@@ -1,0 +1,78 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireRole } from '@/lib/auth';
+import { getTaskById, updateTask, createTaskUpdate } from '@/lib/db';
+
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const session = await requireRole('admin', 'assigner', 'executor');
+    const { id } = await params;
+    const body = await request.json();
+    const { action } = body;
+
+    const task = getTaskById(id);
+    if (!task) {
+      return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
+    }
+
+    // Executor requests closure
+    if (action === 'request_closure' && (session.role === 'executor' || session.role === 'admin')) {
+      if (task.status !== 'in_progress') {
+        return NextResponse.json({ error: 'Solo se puede solicitar cierre de tareas en progreso' }, { status: 400 });
+      }
+      const updated = updateTask(id, { status: 'waiting_approval' });
+      createTaskUpdate({
+        task_id: id,
+        user_id: session.userId,
+        comment: 'Solicitó cierre de tarea',
+        hours_spent: 0,
+        time_type: null,
+        attachment_url: null,
+        attachment_expires_at: null,
+        is_system: true,
+      });
+      return NextResponse.json({ task: updated, success: true });
+    }
+
+    // Assigner/Admin approves closure
+    if (action === 'approve' && (session.role === 'assigner' || session.role === 'admin')) {
+      if (task.status !== 'waiting_approval') {
+        return NextResponse.json({ error: 'Solo se pueden aprobar tareas en espera de confirmación' }, { status: 400 });
+      }
+      const updated = updateTask(id, { status: 'closed', closed_at: new Date().toISOString() });
+      createTaskUpdate({
+        task_id: id,
+        user_id: session.userId,
+        comment: 'Aprobó el cierre de la tarea',
+        hours_spent: 0,
+        time_type: null,
+        attachment_url: null,
+        attachment_expires_at: null,
+        is_system: true,
+      });
+      return NextResponse.json({ task: updated, success: true });
+    }
+
+    // Assigner/Admin rejects closure
+    if (action === 'reject' && (session.role === 'assigner' || session.role === 'admin')) {
+      if (task.status !== 'waiting_approval') {
+        return NextResponse.json({ error: 'Solo se pueden rechazar tareas en espera de confirmación' }, { status: 400 });
+      }
+      const updated = updateTask(id, { status: 'in_progress' });
+      createTaskUpdate({
+        task_id: id,
+        user_id: session.userId,
+        comment: 'Rechazó el cierre de la tarea',
+        hours_spent: 0,
+        time_type: null,
+        attachment_url: null,
+        attachment_expires_at: null,
+        is_system: true,
+      });
+      return NextResponse.json({ task: updated, success: true });
+    }
+
+    return NextResponse.json({ error: 'Acción no válida' }, { status: 400 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || 'Error en el servidor' }, { status: 500 });
+  }
+}
