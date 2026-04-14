@@ -9,7 +9,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const body = await request.json();
     const { action } = body;
 
-    const task = getTaskById(id);
+    const task = await getTaskById(id);
     if (!task) {
       return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
     }
@@ -19,8 +19,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (task.status !== 'in_progress') {
         return NextResponse.json({ error: 'Solo se puede solicitar cierre de tareas en progreso' }, { status: 400 });
       }
-      const updated = updateTask(id, { status: 'waiting_approval' });
-      createTaskUpdate({
+      const updated = await updateTask(id, { status: 'waiting_approval' });
+      await createTaskUpdate({
         task_id: id,
         user_id: session.userId,
         comment: 'Solicitó cierre de tarea',
@@ -38,8 +38,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (task.status !== 'waiting_approval') {
         return NextResponse.json({ error: 'Solo se pueden aprobar tareas en espera de confirmación' }, { status: 400 });
       }
-      const updated = updateTask(id, { status: 'closed', closed_at: new Date().toISOString() });
-      createTaskUpdate({
+      const updated = await updateTask(id, { status: 'closed', closed_at: new Date().toISOString() });
+      await createTaskUpdate({
         task_id: id,
         user_id: session.userId,
         comment: 'Aprobó el cierre de la tarea',
@@ -57,8 +57,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (task.status !== 'waiting_approval') {
         return NextResponse.json({ error: 'Solo se pueden rechazar tareas en espera de confirmación' }, { status: 400 });
       }
-      const updated = updateTask(id, { status: 'in_progress' });
-      createTaskUpdate({
+      const updated = await updateTask(id, { status: 'in_progress' });
+      await createTaskUpdate({
         task_id: id,
         user_id: session.userId,
         comment: 'Rechazó el cierre de la tarea',

@@ -6,7 +6,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const session = await requireRole('admin', 'assigner', 'executor');
     const { id } = await params;
-    const task = getTaskById(id);
+    const task = await getTaskById(id);
     if (!task) {
       return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
     }
@@ -17,10 +17,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const { getTaskUpdates, getTaskCategories, getUserById } = await import('@/lib/db');
-    const updates = getTaskUpdates(id).map(u => ({ ...u, user: getUserById(u.user_id) ? { id: u.user_id, full_name: getUserById(u.user_id)!.full_name, username: getUserById(u.user_id)!.username, role: getUserById(u.user_id)!.role } : null }));
-    const categories = getTaskCategories(id);
-    const assignedUser = getUserById(task.assigned_user_id);
-    const createdByUser = getUserById(task.created_by);
+    const updatesRaw = await getTaskUpdates(id);
+    const updates = await Promise.all(updatesRaw.map(async u => {
+      const uUser = await getUserById(u.user_id);
+      return { ...u, user: uUser ? { id: u.user_id, full_name: uUser.full_name, username: uUser.username, role: uUser.role } : null };
+    }));
+    
+    const categories = await getTaskCategories(id);
+    const assignedUser = await getUserById(task.assigned_user_id);
+    const createdByUser = await getUserById(task.created_by);
 
     return NextResponse.json({
       task: {
@@ -42,14 +47,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const { id } = await params;
     const body = await request.json();
 
-    const task = getTaskById(id);
+    const task = await getTaskById(id);
     if (!task) {
       return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
     }
 
     // Handle reassignment
     if (body.reassign_to && body.reassign_to !== task.assigned_user_id) {
-      const updated = reassignTask(id, body.reassign_to, session.userId);
+      const updated = await reassignTask(id, body.reassign_to, session.userId);
       return NextResponse.json({ task: updated, success: true });
     }
 
@@ -60,12 +65,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (priority !== undefined) updates.priority = priority;
     if (deadline !== undefined) updates.deadline = deadline;
 
-    const updated = updateTask(id, updates);
+    const updated = await updateTask(id, updates);
 
     // Update categories
     if (category_ids !== undefined) {
       const { setTaskCategories } = await import('@/lib/db');
-      setTaskCategories(id, category_ids);
+      await setTaskCategories(id, category_ids);
     }
 
     return NextResponse.json({ task: updated, success: true });

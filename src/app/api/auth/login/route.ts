@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Usuario y contraseña son requeridos' }, { status: 400 });
     }
 
-    const user = getUserByUsername(username);
+    const user = await getUserByUsername(username);
     if (!user) {
       return NextResponse.json({ error: 'Usuario o contraseña incorrectos' }, { status: 401 });
     }

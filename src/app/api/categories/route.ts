@@ -5,7 +5,7 @@ import { getAllCategories, createCategory, updateCategory, deleteCategory } from
 export async function GET() {
   try {
     const session = await requireRole('admin', 'assigner', 'executor');
-    const categories = getAllCategories();
+    const categories = await getAllCategories();
     return NextResponse.json({ categories });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Error' }, { status: 403 });
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'El nombre es requerido' }, { status: 400 });
     }
 
-    const category = createCategory({
+    const category = await createCategory({
       name,
       parent_id: parent_id || null,
       created_by: session.userId,
@@ -54,7 +54,7 @@ export async function PUT(request: NextRequest) {
     if (parent_id !== undefined) updates.parent_id = parent_id;
     if (active !== undefined) updates.active = active;
 
-    const category = updateCategory(id, updates);
+    const category = await updateCategory(id, updates);
     return NextResponse.json({ category, success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Error' }, { status: 403 });
@@ -72,7 +72,7 @@ export async function DELETE(request: NextRequest) {
     const id = searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'ID requerido' }, { status: 400 });
 
-    deleteCategory(id);
+    await deleteCategory(id);
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Error' }, { status: 403 });

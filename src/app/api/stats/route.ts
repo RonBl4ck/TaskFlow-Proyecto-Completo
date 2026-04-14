@@ -12,13 +12,13 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
 
-    const overview = getStatsOverview();
-    const categoryStats = getCategoryStats();
-    const userStats = getUserStatsAll();
+    const overview = await getStatsOverview();
+    const categoryStats = await getCategoryStats();
+    const userStats = await getUserStatsAll();
 
     let individualStats = null;
     if (userId) {
-      individualStats = getIndividualUserStats(userId);
+      individualStats = await getIndividualUserStats(userId);
     }
 
     return NextResponse.json({

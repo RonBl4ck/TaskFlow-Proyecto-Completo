@@ -6,7 +6,7 @@ import bcrypt from 'bcryptjs';
 export async function GET() {
   try {
     await requireRole('admin');
-    const users = getAllUsers();
+    const users = await getAllUsers();
     return NextResponse.json({ users });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Error' }, { status: 403 });
@@ -27,13 +27,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Rol inválido' }, { status: 400 });
     }
 
-    const existing = (await import('@/lib/db')).getUserByUsername(username);
+    const existing = await (await import('@/lib/db')).getUserByUsername(username);
     if (existing) {
       return NextResponse.json({ error: 'El nombre de usuario ya existe' }, { status: 409 });
     }
 
     const password_hash = bcrypt.hashSync(password, 10);
-    const user = createUser({
+    const user = await createUser({
       username,
       password_hash,
       full_name,
@@ -69,7 +69,7 @@ export async function PUT(request: NextRequest) {
     if (assignable_user_ids !== undefined) updates.assignable_user_ids = assignable_user_ids;
     if (password) updates.password_hash = bcrypt.hashSync(password, 10);
 
-    const user = updateUser(id, updates);
+    const user = await updateUser(id, updates);
     return NextResponse.json({ user: { ...user, password_hash: '' }, success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Error' }, { status: 403 });
@@ -83,7 +83,7 @@ export async function DELETE(request: NextRequest) {
     const id = searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'ID requerido' }, { status: 400 });
 
-    deleteUser(id);
+    await deleteUser(id);
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Error' }, { status: 403 });

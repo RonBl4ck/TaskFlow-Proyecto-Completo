@@ -1,428 +1,249 @@
 import { User, Task, TaskUpdate, Category, TaskCategory } from './types';
+import { supabase } from './supabase';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
-import fs from 'fs';
-import path from 'path';
-
-const DATA_DIR = path.join(process.cwd(), 'src', 'data');
-
-interface Database {
-  users: User[];
-  tasks: Task[];
-  task_updates: TaskUpdate[];
-  categories: Category[];
-  task_categories: TaskCategory[];
-}
-
-const DEFAULT_DB: Database = {
-  users: [
-    {
-      id: 'admin-001',
-      username: 'admin',
-      password_hash: bcrypt.hashSync('admin123', 10),
-      full_name: 'Administrador',
-      role: 'admin',
-      can_view_stats: true,
-      can_manage_categories: true,
-      can_view_all_tasks: true,
-      assignable_user_ids: [],
-      active: true,
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'assigner-001',
-      username: 'jefe',
-      password_hash: bcrypt.hashSync('jefe123', 10),
-      full_name: 'Carlos Jefe',
-      role: 'assigner',
-      can_view_stats: true,
-      can_manage_categories: true,
-      can_view_all_tasks: true,
-      assignable_user_ids: [],
-      active: true,
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'executor-001',
-      username: 'maria',
-      password_hash: bcrypt.hashSync('maria123', 10),
-      full_name: 'María Ejecutora',
-      role: 'executor',
-      can_view_stats: false,
-      can_manage_categories: false,
-      can_view_all_tasks: false,
-      assignable_user_ids: [],
-      active: true,
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'executor-002',
-      username: 'pedro',
-      password_hash: bcrypt.hashSync('pedro123', 10),
-      full_name: 'Pedro Ejecutor',
-      role: 'executor',
-      can_view_stats: false,
-      can_manage_categories: false,
-      can_view_all_tasks: false,
-      assignable_user_ids: [],
-      active: true,
-      created_at: new Date().toISOString(),
-    },
-  ],
-  tasks: [],
-  task_updates: [],
-  categories: [
-    {
-      id: 'cat-001',
-      name: 'Desarrollo',
-      parent_id: null,
-      created_by: 'admin-001',
-      creation_date: new Date().toISOString(),
-      active: true,
-    },
-    {
-      id: 'cat-002',
-      name: 'Frontend',
-      parent_id: 'cat-001',
-      created_by: 'admin-001',
-      creation_date: new Date().toISOString(),
-      active: true,
-    },
-    {
-      id: 'cat-003',
-      name: 'Backend',
-      parent_id: 'cat-001',
-      created_by: 'admin-001',
-      creation_date: new Date().toISOString(),
-      active: true,
-    },
-    {
-      id: 'cat-004',
-      name: 'Diseño',
-      parent_id: null,
-      created_by: 'admin-001',
-      creation_date: new Date().toISOString(),
-      active: true,
-    },
-    {
-      id: 'cat-005',
-      name: 'UI',
-      parent_id: 'cat-004',
-      created_by: 'admin-001',
-      creation_date: new Date().toISOString(),
-      active: true,
-    },
-    {
-      id: 'cat-006',
-      name: 'UX',
-      parent_id: 'cat-004',
-      created_by: 'admin-001',
-      creation_date: new Date().toISOString(),
-      active: true,
-    },
-    {
-      id: 'cat-007',
-      name: 'Soporte',
-      parent_id: null,
-      created_by: 'admin-001',
-      creation_date: new Date().toISOString(),
-      active: true,
-    },
-  ],
-  task_categories: [],
-};
-
-let db: Database;
-
-function loadData(): Database {
-  const dbPath = path.join(DATA_DIR, 'db.json');
-  try {
-    if (fs.existsSync(dbPath)) {
-      const raw = fs.readFileSync(dbPath, 'utf-8');
-      return JSON.parse(raw);
-    }
-  } catch (e) {
-    console.error('Error loading DB, using defaults:', e);
-  }
-  return JSON.parse(JSON.stringify(DEFAULT_DB));
-}
-
-function saveData(): void {
-  const dbPath = path.join(DATA_DIR, 'db.json');
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
-  } catch (e) {
-    console.error('Error saving DB:', e);
-  }
-}
-
-// Initialize DB
-db = loadData();
 
 // ============ USERS ============
 
-export function getUserByUsername(username: string): User | undefined {
-  return db.users.find(u => u.username === username && u.active);
+export async function getUserByUsername(username: string): Promise<User | undefined> {
+  const { data } = await supabase.from('users').select('*').eq('username', username).eq('active', true).single();
+  return data || undefined;
 }
 
-export function getUserById(id: string): User | undefined {
-  return db.users.find(u => u.id === id);
+export async function getUserById(id: string): Promise<User | undefined> {
+  const { data } = await supabase.from('users').select('*').eq('id', id).single();
+  return data || undefined;
 }
 
-export function getAllUsers(): User[] {
-  return db.users.filter(u => u.active).map(u => ({
-    ...u,
-    password_hash: '',
-  }));
+export async function getAllUsers(): Promise<User[]> {
+  const { data } = await supabase.from('users').select('*').eq('active', true);
+  if (!data) return [];
+  return data.map(u => ({ ...u, password_hash: '' }));
 }
 
-export function getExecutors(): User[] {
-  return db.users.filter(u => u.role === 'executor' && u.active).map(u => ({
-    ...u,
-    password_hash: '',
-  }));
+export async function getExecutors(): Promise<User[]> {
+  const { data } = await supabase.from('users').select('*').eq('role', 'executor').eq('active', true);
+  if (!data) return [];
+  return data.map(u => ({ ...u, password_hash: '' }));
 }
 
-export function getAssignersAndAdmins(): User[] {
-  return db.users.filter(u => (u.role === 'assigner' || u.role === 'admin') && u.active).map(u => ({
-    ...u,
-    password_hash: '',
-  }));
+export async function getAssignersAndAdmins(): Promise<User[]> {
+  const { data } = await supabase.from('users').select('*').in('role', ['assigner', 'admin']).eq('active', true);
+  if (!data) return [];
+  return data.map(u => ({ ...u, password_hash: '' }));
 }
 
-export function createUser(data: Omit<User, 'id' | 'created_at'>): User {
-  const user: User = {
-    ...data,
-    id: uuidv4(),
-    created_at: new Date().toISOString(),
-  };
-  db.users.push(user);
-  saveData();
+export async function createUser(data: Omit<User, 'id' | 'created_at'>): Promise<User> {
+  const id = uuidv4();
+  const { data: user, error } = await supabase.from('users').insert({ ...data, id }).select().single();
+  if (error) throw new Error(error.message);
   return user;
 }
 
-export function updateUser(id: string, data: Partial<User>): User | null {
-  const idx = db.users.findIndex(u => u.id === id);
-  if (idx === -1) return null;
-  db.users[idx] = { ...db.users[idx], ...data };
-  saveData();
-  return db.users[idx];
+export async function updateUser(id: string, data: Partial<User>): Promise<User | null> {
+  const { data: user, error } = await supabase.from('users').update(data).eq('id', id).select().single();
+  if (error) return null;
+  return user;
 }
 
-export function deleteUser(id: string): boolean {
-  const idx = db.users.findIndex(u => u.id === id);
-  if (idx === -1) return false;
-  db.users[idx].active = false;
-  saveData();
-  return true;
+export async function deleteUser(id: string): Promise<boolean> {
+  const { error } = await supabase.from('users').update({ active: false }).eq('id', id);
+  return !error;
 }
 
 // ============ TASKS ============
 
-export function createTask(data: Omit<Task, 'id' | 'created_at' | 'updated_at' | 'closed_at'>): Task {
-  const task: Task = {
-    ...data,
-    id: uuidv4(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    closed_at: null,
-  };
-  db.tasks.push(task);
-  saveData();
+export async function createTask(data: Omit<Task, 'id' | 'created_at' | 'updated_at' | 'closed_at'>): Promise<Task> {
+  const id = uuidv4();
+  const { data: task, error } = await supabase.from('tasks').insert({ ...data, id }).select().single();
+  if (error) throw new Error(error.message);
   return task;
 }
 
-export function getTaskById(id: string): Task | undefined {
-  return db.tasks.find(t => t.id === id);
+export async function getTaskById(id: string): Promise<Task | undefined> {
+  const { data } = await supabase.from('tasks').select('*').eq('id', id).single();
+  return data || undefined;
 }
 
-export function getTasksByAssignee(userId: string): Task[] {
-  return db.tasks.filter(t => t.assigned_user_id === userId);
+export async function getTasksByAssignee(userId: string): Promise<Task[]> {
+  const { data } = await supabase.from('tasks').select('*').eq('assigned_user_id', userId);
+  return data || [];
 }
 
-export function getAllTasks(): Task[] {
-  return [...db.tasks];
+export async function getAllTasks(): Promise<Task[]> {
+  const { data } = await supabase.from('tasks').select('*').order('created_at', { ascending: false });
+  return data || [];
 }
 
-export function updateTask(id: string, data: Partial<Task>): Task | null {
-  const idx = db.tasks.findIndex(t => t.id === id);
-  if (idx === -1) return null;
-  db.tasks[idx] = { ...db.tasks[idx], ...data, updated_at: new Date().toISOString() };
-  saveData();
-  return db.tasks[idx];
+export async function updateTask(id: string, data: Partial<Task>): Promise<Task | null> {
+  const { data: task, error } = await supabase.from('tasks').update({ ...data, updated_at: new Date().toISOString() }).eq('id', id).select().single();
+  if (error) return null;
+  return task;
 }
 
-export function reassignTask(taskId: string, newUserId: string, reassignedBy: string): Task | null {
-  const idx = db.tasks.findIndex(t => t.id === taskId);
-  if (idx === -1) return null;
-  const oldUserId = db.tasks[idx].assigned_user_id;
-  db.tasks[idx].assigned_user_id = newUserId;
-  db.tasks[idx].updated_at = new Date().toISOString();
-  // Create system update
-  createTaskUpdate({
+export async function reassignTask(taskId: string, newUserId: string, reassignedBy: string): Promise<Task | null> {
+  const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).single();
+  if (!task) return null;
+  const oldUserId = task.assigned_user_id;
+
+  const { data: updatedTask, error } = await supabase.from('tasks')
+    .update({ assigned_user_id: newUserId, updated_at: new Date().toISOString() })
+    .eq('id', taskId)
+    .select()
+    .single();
+    
+  if (error || !updatedTask) return null;
+
+  const oldUser = await getUserById(oldUserId);
+  const newUser = await getUserById(newUserId);
+
+  await createTaskUpdate({
     task_id: taskId,
     user_id: reassignedBy,
-    comment: `Tarea reasignada de ${getUserById(oldUserId)?.full_name || 'Desconocido'} a ${getUserById(newUserId)?.full_name || 'Desconocido'}`,
+    comment: `Tarea reasignada de ${oldUser?.full_name || 'Desconocido'} a ${newUser?.full_name || 'Desconocido'}`,
     hours_spent: 0,
     time_type: null,
     attachment_url: null,
     attachment_expires_at: null,
     is_system: true,
   });
-  saveData();
-  return db.tasks[idx];
+
+  return updatedTask;
 }
 
 // ============ TASK UPDATES ============
 
-export function createTaskUpdate(data: Omit<TaskUpdate, 'id' | 'timestamp' | 'deleted'>): TaskUpdate {
-  const update: TaskUpdate = {
-    ...data,
-    id: uuidv4(),
-    timestamp: new Date().toISOString(),
-    deleted: false,
-  };
-  db.task_updates.push(update);
-  // Also update the task's updated_at
-  const taskIdx = db.tasks.findIndex(t => t.id === data.task_id);
-  if (taskIdx !== -1) {
-    db.tasks[taskIdx].updated_at = new Date().toISOString();
-  }
-  saveData();
+export async function createTaskUpdate(data: Omit<TaskUpdate, 'id' | 'timestamp' | 'deleted'>): Promise<TaskUpdate> {
+  const id = uuidv4();
+  const { data: update, error } = await supabase.from('task_updates').insert({ ...data, id }).select().single();
+  if (error) throw new Error(error.message);
+  
+  await supabase.from('tasks').update({ updated_at: new Date().toISOString() }).eq('id', data.task_id);
+
   return update;
 }
 
-export function getTaskUpdates(taskId: string): TaskUpdate[] {
-  return db.task_updates
-    .filter(u => u.task_id === taskId && !u.deleted)
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+export async function getTaskUpdates(taskId: string): Promise<TaskUpdate[]> {
+  const { data } = await supabase.from('task_updates')
+    .select('*')
+    .eq('task_id', taskId)
+    .eq('deleted', false)
+    .order('timestamp', { ascending: false });
+  return data || [];
 }
 
-export function softDeleteUpdate(updateId: string): boolean {
-  const idx = db.task_updates.findIndex(u => u.id === updateId);
-  if (idx === -1) return false;
-  db.task_updates[idx].deleted = true;
-  saveData();
-  return true;
+export async function softDeleteUpdate(updateId: string): Promise<boolean> {
+  const { error } = await supabase.from('task_updates').update({ deleted: true }).eq('id', updateId);
+  return !error;
 }
 
 // ============ CATEGORIES ============
 
-export function getAllCategories(): Category[] {
-  return db.categories.filter(c => c.active).sort((a, b) => {
+export async function getAllCategories(): Promise<Category[]> {
+  const { data } = await supabase.from('categories').select('*').eq('active', true);
+  if (!data) return [];
+  return data.sort((a, b) => {
     if (a.parent_id && !b.parent_id) return 1;
     if (!a.parent_id && b.parent_id) return -1;
     return a.name.localeCompare(b.name);
   });
 }
 
-export function getCategoryById(id: string): Category | undefined {
-  return db.categories.find(c => c.id === id && c.active);
+export async function getCategoryById(id: string): Promise<Category | undefined> {
+  const { data } = await supabase.from('categories').select('*').eq('id', id).eq('active', true).single();
+  return data || undefined;
 }
 
-export function createCategory(data: Omit<Category, 'id' | 'creation_date'>): Category {
-  const category: Category = {
-    ...data,
-    id: uuidv4(),
-    creation_date: new Date().toISOString(),
-  };
-  db.categories.push(category);
-  saveData();
+export async function createCategory(data: Omit<Category, 'id' | 'creation_date'>): Promise<Category> {
+  const id = uuidv4();
+  const { data: category, error } = await supabase.from('categories').insert({ ...data, id }).select().single();
+  if (error) throw new Error(error.message);
   return category;
 }
 
-export function updateCategory(id: string, data: Partial<Category>): Category | null {
-  const idx = db.categories.findIndex(c => c.id === id);
-  if (idx === -1) return null;
-  db.categories[idx] = { ...db.categories[idx], ...data };
-  saveData();
-  return db.categories[idx];
+export async function updateCategory(id: string, data: Partial<Category>): Promise<Category | null> {
+  const { data: category, error } = await supabase.from('categories').update(data).eq('id', id).select().single();
+  if (error) return null;
+  return category;
 }
 
-export function deleteCategory(id: string): boolean {
-  const idx = db.categories.findIndex(c => c.id === id);
-  if (idx === -1) return false;
-  db.categories[idx].active = false;
-  // Also remove task_category associations
-  db.task_categories = db.task_categories.filter(tc => tc.category_id !== id);
-  saveData();
+export async function deleteCategory(id: string): Promise<boolean> {
+  const { error: error1 } = await supabase.from('categories').update({ active: false }).eq('id', id);
+  if (error1) return false;
+  await supabase.from('task_categories').delete().eq('category_id', id);
   return true;
 }
 
 // ============ TASK CATEGORIES ============
 
-export function setTaskCategories(taskId: string, categoryIds: string[]): void {
-  db.task_categories = db.task_categories.filter(tc => tc.task_id !== taskId);
-  for (const catId of categoryIds) {
-    db.task_categories.push({ task_id: taskId, category_id: catId });
+export async function setTaskCategories(taskId: string, categoryIds: string[]): Promise<void> {
+  await supabase.from('task_categories').delete().eq('task_id', taskId);
+  if (categoryIds.length > 0) {
+    const inserts = categoryIds.map(catId => ({ task_id: taskId, category_id: catId }));
+    await supabase.from('task_categories').insert(inserts);
   }
-  saveData();
 }
 
-export function getTaskCategories(taskId: string): Category[] {
-  const catIds = db.task_categories.filter(tc => tc.task_id === taskId).map(tc => tc.category_id);
-  return db.categories.filter(c => catIds.includes(c.id) && c.active);
+export async function getTaskCategories(taskId: string): Promise<Category[]> {
+  const { data: relations } = await supabase.from('task_categories').select('category_id').eq('task_id', taskId);
+  if (!relations || relations.length === 0) return [];
+  const catIds = relations.map(r => r.category_id);
+  const { data: categories } = await supabase.from('categories').select('*').in('id', catIds).eq('active', true);
+  return categories || [];
 }
 
 // ============ STATISTICS ============
 
-export function getStatsOverview(): {
-  totalTasks: number;
-  pendingTasks: number;
-  inProgressTasks: number;
-  waitingApprovalTasks: number;
-  closedTasks: number;
-  rejectedTasks: number;
-  totalHours: number;
-  officeHours: number;
-  outsideHours: number;
-} {
-  const updates = db.task_updates.filter(u => !u.deleted && !u.is_system);
-  const totalHours = updates.reduce((sum, u) => sum + (u.hours_spent || 0), 0);
-  const officeHours = updates.filter(u => u.time_type === 'office').reduce((sum, u) => sum + (u.hours_spent || 0), 0);
-  const outsideHours = updates.filter(u => u.time_type === 'outside').reduce((sum, u) => sum + (u.hours_spent || 0), 0);
-
-  // Count active days (days with at least one update)
-  const activeDays = new Set(updates.map(u => u.timestamp.split('T')[0])).size;
-  const avgHoursPerDay = activeDays > 0 ? totalHours / activeDays : 0;
+export async function getStatsOverview(): Promise<any> {
+  const { data: updates } = await supabase.from('task_updates').select('hours_spent, time_type, timestamp').eq('deleted', false).eq('is_system', false);
+  const { data: tasks } = await supabase.from('tasks').select('status');
+  
+  const totalHours = updates?.reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0) || 0;
+  const officeHours = updates?.filter(u => u.time_type === 'office').reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0) || 0;
+  const outsideHours = updates?.filter(u => u.time_type === 'outside').reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0) || 0;
 
   return {
-    totalTasks: db.tasks.length,
-    pendingTasks: db.tasks.filter(t => t.status === 'pending').length,
-    inProgressTasks: db.tasks.filter(t => t.status === 'in_progress').length,
-    waitingApprovalTasks: db.tasks.filter(t => t.status === 'waiting_approval').length,
-    closedTasks: db.tasks.filter(t => t.status === 'closed').length,
-    rejectedTasks: db.tasks.filter(t => t.status === 'rejected').length,
+    totalTasks: tasks?.length || 0,
+    pendingTasks: tasks?.filter(t => t.status === 'pending').length || 0,
+    inProgressTasks: tasks?.filter(t => t.status === 'in_progress').length || 0,
+    waitingApprovalTasks: tasks?.filter(t => t.status === 'waiting_approval').length || 0,
+    closedTasks: tasks?.filter(t => t.status === 'closed').length || 0,
+    rejectedTasks: tasks?.filter(t => t.status === 'rejected').length || 0,
     totalHours: Math.round(totalHours * 100) / 100,
     officeHours: Math.round(officeHours * 100) / 100,
     outsideHours: Math.round(outsideHours * 100) / 100,
   };
 }
 
-export function getCategoryStats(): { category_id: string; category_name: string; hours_spent: number; tasks_closed: number }[] {
-  const allCats = getAllCategories();
-  return allCats.map(cat => {
-    const taskIds = db.task_categories.filter(tc => tc.category_id === cat.id).map(tc => tc.task_id);
-    const updates = db.task_updates.filter(u => taskIds.includes(u.task_id) && !u.deleted && !u.is_system);
-    const hours = updates.reduce((sum, u) => sum + (u.hours_spent || 0), 0);
-    const closed = db.tasks.filter(t => taskIds.includes(t.id) && t.status === 'closed').length;
+export async function getCategoryStats(): Promise<any[]> {
+  const cats = await getAllCategories();
+  const { data: tcs } = await supabase.from('task_categories').select('task_id, category_id');
+  const { data: updates } = await supabase.from('task_updates').select('task_id, hours_spent').eq('deleted', false).eq('is_system', false);
+  const { data: tasks } = await supabase.from('tasks').select('id, status');
+
+  return cats.map(cat => {
+    const taskIds = tcs?.filter(tc => tc.category_id === cat.id).map(tc => tc.task_id) || [];
+    const catUpdates = updates?.filter(u => taskIds.includes(u.task_id)) || [];
+    const hours = catUpdates.reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0);
+    const closed = tasks?.filter(t => taskIds.includes(t.id) && t.status === 'closed').length || 0;
+    
     return { category_id: cat.id, category_name: cat.name, hours_spent: Math.round(hours * 100) / 100, tasks_closed: closed };
   }).filter(c => c.hours_spent > 0 || c.tasks_closed > 0);
 }
 
-export function getUserStatsAll(): { user_id: string; full_name: string; total_hours: number; office_hours: number; outside_hours: number; tasks_completed: number; avg_hours_per_task: number }[] {
-  const users = getAllUsers().filter(u => u.role === 'executor');
+export async function getUserStatsAll(): Promise<any[]> {
+  const users = await getExecutors();
+  const { data: tasks } = await supabase.from('tasks').select('id, assigned_user_id, status');
+  const { data: updates } = await supabase.from('task_updates').select('user_id, hours_spent, time_type').eq('deleted', false).eq('is_system', false);
+
   return users.map(user => {
-    const userTaskIds = db.tasks.filter(t => t.assigned_user_id === user.id).map(t => t.id);
-    const updates = db.task_updates.filter(u => u.user_id === user.id && !u.deleted && !u.is_system);
-    const totalHours = updates.reduce((sum, u) => sum + (u.hours_spent || 0), 0);
-    const officeHours = updates.filter(u => u.time_type === 'office').reduce((sum, u) => sum + (u.hours_spent || 0), 0);
-    const outsideHours = updates.filter(u => u.time_type === 'outside').reduce((sum, u) => sum + (u.hours_spent || 0), 0);
-    const completed = db.tasks.filter(t => t.assigned_user_id === user.id && t.status === 'closed').length;
+    const userUpdates = updates?.filter(u => u.user_id === user.id) || [];
+    const totalHours = userUpdates.reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0);
+    const officeHours = userUpdates.filter(u => u.time_type === 'office').reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0);
+    const outsideHours = userUpdates.filter(u => u.time_type === 'outside').reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0);
+    const completed = tasks?.filter(t => t.assigned_user_id === user.id && t.status === 'closed').length || 0;
     const avgPerTask = completed > 0 ? totalHours / completed : 0;
+    
     return {
       user_id: user.id,
       full_name: user.full_name,
@@ -435,41 +256,43 @@ export function getUserStatsAll(): { user_id: string; full_name: string; total_h
   });
 }
 
-export function getIndividualUserStats(userId: string): {
-  daily: { date: string; hours: number }[];
-  weekly: { week: string; hours: number }[];
-  byCategory: { category_name: string; hours: number }[];
-} {
-  const updates = db.task_updates.filter(u => u.user_id === userId && !u.deleted && !u.is_system);
+export async function getIndividualUserStats(userId: string): Promise<any> {
+  const { data: updates } = await supabase.from('task_updates')
+    .select('task_id, hours_spent, timestamp')
+    .eq('user_id', userId)
+    .eq('deleted', false)
+    .eq('is_system', false);
+
+  const { data: tcs } = await supabase.from('task_categories').select('task_id, category_id');
+  const cats = await getAllCategories();
 
   // Daily hours
   const dailyMap = new Map<string, number>();
-  updates.forEach(u => {
-    const date = u.timestamp.split('T')[0];
-    dailyMap.set(date, (dailyMap.get(date) || 0) + (u.hours_spent || 0));
+  updates?.forEach(u => {
+    const date = String(u.timestamp).split('T')[0];
+    dailyMap.set(date, (dailyMap.get(date) || 0) + (Number(u.hours_spent) || 0));
   });
   const daily = Array.from(dailyMap.entries()).map(([date, hours]) => ({ date, hours: Math.round(hours * 100) / 100 })).sort((a, b) => a.date.localeCompare(b.date));
 
   // Weekly hours
   const weeklyMap = new Map<string, number>();
-  updates.forEach(u => {
-    const d = new Date(u.timestamp);
+  updates?.forEach(u => {
+    const d = new Date(String(u.timestamp));
     const weekStart = new Date(d);
     weekStart.setDate(d.getDate() - d.getDay());
     const weekKey = weekStart.toISOString().split('T')[0];
-    weeklyMap.set(weekKey, (weeklyMap.get(weekKey) || 0) + (u.hours_spent || 0));
+    weeklyMap.set(weekKey, (weeklyMap.get(weekKey) || 0) + (Number(u.hours_spent) || 0));
   });
   const weekly = Array.from(weeklyMap.entries()).map(([week, hours]) => ({ week, hours: Math.round(hours * 100) / 100 })).sort((a, b) => a.week.localeCompare(b.week));
 
   // By category
-  const userTaskIds = db.tasks.filter(t => t.assigned_user_id === userId).map(t => t.id);
   const catHoursMap = new Map<string, number>();
-  updates.forEach(u => {
-    const tcs = db.task_categories.filter(tc => tc.task_id === u.task_id);
-    tcs.forEach(tc => {
-      const cat = getCategoryById(tc.category_id);
+  updates?.forEach(u => {
+    const taskCats = tcs?.filter(tc => tc.task_id === u.task_id) || [];
+    taskCats.forEach(tc => {
+      const cat = cats.find(c => c.id === tc.category_id);
       if (cat) {
-        catHoursMap.set(cat.name, (catHoursMap.get(cat.name) || 0) + (u.hours_spent || 0));
+        catHoursMap.set(cat.name, (catHoursMap.get(cat.name) || 0) + (Number(u.hours_spent) || 0));
       }
     });
   });
@@ -478,22 +301,18 @@ export function getIndividualUserStats(userId: string): {
   return { daily, weekly, byCategory };
 }
 
-export function getUnreadCount(userId: string): number {
-  const userTasks = db.tasks.filter(t => t.assigned_user_id === userId && t.status !== 'closed');
+export async function getUnreadCount(userId: string): Promise<number> {
+  const { data: tasks } = await supabase.from('tasks').select('id, status').eq('assigned_user_id', userId).neq('status', 'closed');
+  if (!tasks) return 0;
+  
   let count = 0;
-  userTasks.forEach(task => {
-    const updates = db.task_updates.filter(u => u.task_id === task.id && !u.deleted);
-    if (updates.length > 0) {
-      const lastUpdate = updates.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
-      if (lastUpdate.user_id !== userId) {
+  for (const task of tasks) {
+    const { data: updates } = await supabase.from('task_updates').select('user_id, timestamp').eq('task_id', task.id).eq('deleted', false).order('timestamp', { ascending: false }).limit(1);
+    if (updates && updates.length > 0) {
+      if (updates[0].user_id !== userId) {
         count++;
       }
     }
-  });
+  }
   return count;
-}
-
-export function resetDatabase(): void {
-  db = JSON.parse(JSON.stringify(DEFAULT_DB));
-  saveData();
 }

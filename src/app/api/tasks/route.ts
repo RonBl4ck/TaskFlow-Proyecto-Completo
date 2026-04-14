@@ -11,23 +11,24 @@ export async function GET(request: NextRequest) {
 
     let tasks;
     if (myTasks) {
-      tasks = getTasksByAssignee(session.userId);
+      tasks = await getTasksByAssignee(session.userId);
     } else if (session.role === 'admin' || session.canViewAllTasks) {
-      tasks = getAllTasks();
+      tasks = await getAllTasks();
     } else if (session.role === 'assigner') {
-      tasks = getAllTasks().filter(t => t.created_by === session.userId || t.assigned_user_id === session.userId);
+      const all = await getAllTasks();
+      tasks = all.filter(t => t.created_by === session.userId || t.assigned_user_id === session.userId);
     } else {
-      tasks = getTasksByAssignee(session.userId);
+      tasks = await getTasksByAssignee(session.userId);
     }
 
     // Enrich with category info
     const { getAllCategories, getTaskCategories } = await import('@/lib/db');
-    const categories = getAllCategories();
+    const categories = await getAllCategories();
 
-    const enriched = tasks.map(task => ({
+    const enriched = await Promise.all(tasks.map(async task => ({
       ...task,
-      categories: getTaskCategories(task.id),
-    }));
+      categories: await getTaskCategories(task.id),
+    })));
 
     // Sort by priority and status
     const priorityOrder: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Rol inválido para crear tareas' }, { status: 403 });
     }
 
-    const task = createTask({
+    const task = await createTask({
       title,
       description: description || '',
       assigned_user_id,
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
     // Set categories
     if (category_ids && category_ids.length > 0) {
       const { setTaskCategories } = await import('@/lib/db');
-      setTaskCategories(task.id, category_ids);
+      await setTaskCategories(task.id, category_ids);
     }
 
     return NextResponse.json({ task, success: true }, { status: 201 });

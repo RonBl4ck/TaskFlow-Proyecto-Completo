@@ -6,11 +6,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const session = await requireRole('admin', 'assigner', 'executor');
     const { id } = await params;
-    const updates = getTaskUpdates(id).map(u => {
+    const updatesRaw = await getTaskUpdates(id);
+    const updates = await Promise.all(updatesRaw.map(async u => {
       const { getUserById } = require('@/lib/db');
-      const user = getUserById(u.user_id);
+      const user = await getUserById(u.user_id);
       return { ...u, user: user ? { id: user.id, full_name: user.full_name, username: user.username, role: user.role } : null };
-    });
+    }));
     return NextResponse.json({ updates });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Error' }, { status: 500 });
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const attachment_expires_at = attachment_url ? new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString() : null;
 
-    const update = createTaskUpdate({
+    const update = await createTaskUpdate({
       task_id: id,
       user_id: session.userId,
       comment: comment || '',
@@ -44,18 +45,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // If assigner/admin comments on in_progress task, change to pending
     if ((session.role === 'assigner' || session.role === 'admin') && comment) {
       const { getTaskById, updateTask } = await import('@/lib/db');
-      const task = getTaskById(id);
+      const task = await getTaskById(id);
       if (task && task.status === 'in_progress') {
-        updateTask(id, { status: 'pending' });
+        await updateTask(id, { status: 'pending' });
       }
     }
 
     // If executor comments on pending task, change to in_progress
     if (session.role === 'executor') {
       const { getTaskById, updateTask } = await import('@/lib/db');
-      const task = getTaskById(id);
+      const task = await getTaskById(id);
       if (task && task.status === 'pending') {
-        updateTask(id, { status: 'in_progress' });
+        await updateTask(id, { status: 'in_progress' });
       }
     }
 
@@ -81,7 +82,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       // We allow assigner to delete updates - you can add more checks here
     }
 
-    softDeleteUpdate(updateId);
+    await softDeleteUpdate(updateId);
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Error' }, { status: 500 });
