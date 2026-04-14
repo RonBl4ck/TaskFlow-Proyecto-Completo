@@ -1,0 +1,120 @@
+{
+  "users": [
+    {
+      "id": "admin-001",
+      "username": "admin",
+      "password_hash": "$2b$10$VMDKh5owwITnK4qz58F98uS4JN74nWxu29Mb.o4nS9nuC8aqa5hrm",
+      "full_name": "LUIS NAVARRETE",
+      "role": "admin",
+      "can_view_stats": true,
+      "can_manage_categories": true,
+      "active": true,
+      "created_at": "2026-04-14T07:00:34.129Z"
+    },
+    {
+      "id": "assigner-001",
+      "username": "jefe",
+      "password_hash": "$2b$10$sMPAMjsxSWX7dKhfWiwW9O2vya9lBIulJh7dxTePC7S6hiAHx/cHm",
+      "full_name": "MARTIN FERRUA",
+      "role": "assigner",
+      "can_view_stats": true,
+      "can_manage_categories": false,
+      "active": true,
+      "created_at": "2026-04-14T07:00:34.210Z"
+    },
+    {
+      "id": "executor-001",
+      "username": "maria",
+      "password_hash": "$2b$10$tJFX39ARQmC2a01CAARf3.2.G5Ke1maAGwG5ri14qnc4TFnaJ0BCe",
+      "full_name": "María Ejecutora",
+      "role": "executor",
+      "can_view_stats": false,
+      "can_manage_categories": false,
+      "active": true,
+      "created_at": "2026-04-14T07:00:34.289Z"
+    },
+    {
+      "id": "executor-002",
+      "username": "pedro",
+      "password_hash": "$2b$10$MufjkMsxzTGNCR3L.aqiOeMBIqhlkDn6fL6Wv6K7oSTmxKhGn48Rq",
+      "full_name": "Pedro Ejecutor",
+      "role": "executor",
+      "can_view_stats": false,
+      "can_manage_categories": false,
+      "active": true,
+      "created_at": "2026-04-14T07:00:34.374Z"
+    },
+    {
+      "username": "C_ARPI",
+      "password_hash": "$2b$10$.wIG2Y7z2sqi1Vw4FpPAjugM5.gc8xoa71uwRMAhU3O7SKJQmU.9y",
+      "full_name": "CARLOS ARPI",
+      "role": "assigner",
+      "can_view_stats": true,
+      "can_manage_categories": true,
+      "active": true,
+      "id": "1ff1b13e-98f4-4ff2-9a26-8fd61087a81b",
+      "created_at": "2026-04-14T07:01:57.705Z"
+    }
+  ],
+  "tasks": [],
+  "task_updates": [],
+  "categories": [
+    {
+      "id": "cat-001",
+      "name": "Desarrollo",
+      "parent_id": null,
+      "created_by": "admin-001",
+      "creation_date": "2026-04-14T07:00:34.374Z",
+      "active": true
+    },
+    {
+      "id": "cat-002",
+      "name": "Frontend",
+      "parent_id": "cat-001",
+      "created_by": "admin-001",
+      "creation_date": "2026-04-14T07:00:34.374Z",
+      "active": true
+    },
+    {
+      "id": "cat-003",
+      "name": "Backend",
+      "parent_id": "cat-001",
+      "created_by": "admin-001",
+      "creation_date": "2026-04-14T07:00:34.374Z",
+      "active": true
+    },
+    {
+      "id": "cat-004",
+      "name": "Diseño",
+      "parent_id": null,
+      "created_by": "admin-001",
+      "creation_date": "2026-04-14T07:00:34.374Z",
+      "active": true
+    },
+    {
+      "id": "cat-005",
+      "name": "UI",
+      "parent_id": "cat-004",
+      "created_by": "admin-001",
+      "creation_date": "2026-04-14T07:00:34.374Z",
+      "active": true
+    },
+    {
+      "id": "cat-006",
+      "name": "UX",
+      "parent_id": "cat-004",
+      "created_by": "admin-001",
+      "creation_date": "2026-04-14T07:00:34.374Z",
+      "active": true
+    },
+    {
+      "id": "cat-007",
+      "name": "Soporte",
+      "parent_id": null,
+      "created_by": "admin-001",
+      "creation_date": "2026-04-14T07:00:34.374Z",
+      "active": true
+    }
+  ],
+  "task_categories": []
+}

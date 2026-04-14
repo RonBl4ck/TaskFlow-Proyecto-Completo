@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
   try {
     await requireRole('admin');
     const body = await request.json();
-    const { username, password, full_name, role, can_view_stats, can_manage_categories } = body;
+    const { username, password, full_name, role, can_view_stats, can_manage_categories, can_view_all_tasks, assignable_user_ids } = body;
 
     if (!username || !password || !full_name || !role) {
       return NextResponse.json({ error: 'Todos los campos son requeridos' }, { status: 400 });
@@ -40,6 +40,8 @@ export async function POST(request: NextRequest) {
       role,
       can_view_stats: can_view_stats || false,
       can_manage_categories: can_manage_categories || false,
+      can_view_all_tasks: can_view_all_tasks || false,
+      assignable_user_ids: assignable_user_ids || [],
       active: true,
     });
 
@@ -53,7 +55,7 @@ export async function PUT(request: NextRequest) {
   try {
     await requireRole('admin');
     const body = await request.json();
-    const { id, full_name, role, can_view_stats, can_manage_categories, password } = body;
+    const { id, full_name, role, can_view_stats, can_manage_categories, password, can_view_all_tasks, assignable_user_ids } = body;
 
     if (!id) {
       return NextResponse.json({ error: 'ID requerido' }, { status: 400 });
@@ -62,8 +64,9 @@ export async function PUT(request: NextRequest) {
     const updates: Record<string, any> = {};
     if (full_name) updates.full_name = full_name;
     if (role) updates.role = role;
-    if (can_view_stats !== undefined) updates.can_view_stats = can_view_stats;
     if (can_manage_categories !== undefined) updates.can_manage_categories = can_manage_categories;
+    if (can_view_all_tasks !== undefined) updates.can_view_all_tasks = can_view_all_tasks;
+    if (assignable_user_ids !== undefined) updates.assignable_user_ids = assignable_user_ids;
     if (password) updates.password_hash = bcrypt.hashSync(password, 10);
 
     const user = updateUser(id, updates);

@@ -32,6 +32,8 @@ export async function POST(request: NextRequest) {
       role: user.role,
       canViewStats: user.can_view_stats,
       canManageCategories: user.can_manage_categories,
+      canViewAllTasks: user.can_view_all_tasks || false,
+      assignableUserIds: user.assignable_user_ids || [],
     });
 
     const response = NextResponse.json({

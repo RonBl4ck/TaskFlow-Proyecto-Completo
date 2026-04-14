@@ -208,7 +208,7 @@ function Sidebar({ session, currentPage, collapsed, onNavigate, onToggle, onLogo
 
   const menuItems: { page: Page; label: string; icon: string; show: boolean; badge?: number }[] = [
     { page: 'my-tasks', label: 'Mis Tareas', icon: '📋', show: true, badge: session.role === 'executor' ? unreadCount : undefined },
-    { page: 'assign-tasks', label: 'Asignar Tareas', icon: '📤', show: session.role === 'admin' || session.role === 'assigner' },
+    { page: 'assign-tasks', label: 'Asignar Tareas', icon: '📤', show: session.role === 'admin' || session.role === 'assigner' || (session.assignableUserIds && session.assignableUserIds.length > 0) },
     { page: 'statistics', label: 'Estadísticas', icon: '📊', show: session.role === 'admin' || session.canViewStats },
     { page: 'admin', label: 'Administración', icon: '⚙️', show: session.role === 'admin' },
   ];
@@ -494,7 +494,13 @@ function AssignTasksPage({ session, onViewTask, refreshKey }: { session: AuthSes
         </button>
       </div>
 
-      {showCreate && <CreateTaskModal users={users.filter(u => u.role === 'executor')} onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); setTasks([]); fetch('/api/tasks').then(r => r.json()).then(d => setTasks(d.tasks || [])); }} />}
+      {showCreate && (
+        <CreateTaskModal 
+          users={users.filter(u => u.role === 'executor').filter(u => session.role !== 'executor' || (session.assignableUserIds && session.assignableUserIds.includes(u.id)))} 
+          onClose={() => setShowCreate(false)} 
+          onCreated={() => { setShowCreate(false); setTasks([]); fetch('/api/tasks').then(r => r.json()).then(d => setTasks(d.tasks || [])); }} 
+        />
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-6">
@@ -806,7 +812,7 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
               </div>
             )}
           </div>
-          {(session.role === 'admin' || session.role === 'assigner') && (
+          {(session.role === 'admin' || session.role === 'assigner' || task.created_by_user_id === session.userId) && (
             <div className="flex flex-col gap-2">
               {task.status === 'waiting_approval' && (
                 <>
@@ -1239,8 +1245,8 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
       {tab === 'users' && (
         <div>
           <button onClick={() => setShowCreateUser(true)} className="mb-4 px-5 py-2.5 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors">+ Nuevo Usuario</button>
-          {showCreateUser && <CreateUserModal onClose={() => setShowCreateUser(false)} onCreated={handleCreateUser} />}
-          {editUser && <EditUserModal user={editUser} onClose={() => setEditUser(null)} onUpdated={() => { setEditUser(null); loadData(); refresh(); }} />}
+          {showCreateUser && <CreateUserModal users={users} onClose={() => setShowCreateUser(false)} onCreated={handleCreateUser} />}
+          {editUser && <EditUserModal users={users} user={editUser} onClose={() => setEditUser(null)} onUpdated={() => { setEditUser(null); loadData(); refresh(); }} />}
 
 
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
@@ -1324,13 +1330,15 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
 }
 
 // =================== CREATE USER MODAL ===================
-function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function CreateUserModal({ users, onClose, onCreated }: { users: User[]; onClose: () => void; onCreated: () => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState('executor');
   const [canViewStats, setCanViewStats] = useState(false);
   const [canManageCats, setCanManageCats] = useState(false);
+  const [canViewAllTasks, setCanViewAllTasks] = useState(false);
+  const [assignableUserIds, setAssignableUserIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -1341,7 +1349,7 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
       const res = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, full_name: fullName, role, can_view_stats: canViewStats, can_manage_categories: canManageCats }),
+        body: JSON.stringify({ username, password, full_name: fullName, role, can_view_stats: canViewStats, can_manage_categories: canManageCats, can_view_all_tasks: canViewAllTasks, assignable_user_ids: assignableUserIds }),
       });
       const data = await res.json();
       if (data.success) { onCreated(); } else { setError(data.error || 'Error'); }
@@ -1359,16 +1367,36 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Contraseña *</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" required /></div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Rol *</label>
-            <select value={role} onChange={e => setRole(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl">
+            <select value={role} onChange={e => setRole(e.target.value as 'admin' | 'assigner' | 'executor')} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl">
               <option value="admin">Administrador</option>
               <option value="assigner">Asignador</option>
               <option value="executor">Ejecutor</option>
             </select>
           </div>
           {role === 'assigner' && (
-            <div className="space-y-2">
+            <div className="space-y-2 p-3 bg-gray-50 rounded-xl border border-gray-100">
+              <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Permisos Opcionales</p>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canViewStats} onChange={e => setCanViewStats(e.target.checked)} className="rounded" /> Puede ver estadísticas</label>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canManageCats} onChange={e => setCanManageCats(e.target.checked)} className="rounded" /> Puede gestionar categorías</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canViewAllTasks} onChange={e => setCanViewAllTasks(e.target.checked)} className="rounded text-blue-600" /> <span className="font-medium text-blue-700">Supervisión Global (Ver todas)</span></label>
+            </div>
+          )}
+          {role === 'executor' && (
+            <div className="space-y-2 p-3 bg-gray-50 rounded-xl border border-gray-100">
+              <p className="text-xs font-semibold text-gray-500 uppercase">Delegación (Líder de Equipo)</p>
+              <p className="text-xs text-gray-500 mb-2">Selecciona a quién puede asignar tareas este ejecutor:</p>
+              <div className="max-h-32 overflow-y-auto space-y-1 bg-white border border-gray-200 rounded-lg p-2">
+                {users.length === 0 && <p className="text-xs text-gray-400">No hay otros usuarios</p>}
+                {users.map(u => (
+                  <label key={u.id} className="flex items-center gap-2 text-sm p-1 hover:bg-gray-50 rounded cursor-pointer">
+                    <input type="checkbox" checked={assignableUserIds.includes(u.id)} onChange={e => {
+                      if (e.target.checked) setAssignableUserIds([...assignableUserIds, u.id]);
+                      else setAssignableUserIds(assignableUserIds.filter(id => id !== u.id));
+                    }} className="rounded" />
+                    {u.full_name} <span className="text-xs text-gray-400">({u.role})</span>
+                  </label>
+                ))}
+              </div>
             </div>
           )}
           <div className="flex gap-3 pt-2">
@@ -1382,12 +1410,14 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
 }
 
 // =================== EDIT USER MODAL ===================
-function EditUserModal({ user, onClose, onUpdated }: { user: User; onClose: () => void; onUpdated: () => void }) {
+function EditUserModal({ users, user, onClose, onUpdated }: { users: User[]; user: User; onClose: () => void; onUpdated: () => void }) {
   const [fullName, setFullName] = useState(user.full_name);
   const [role, setRole] = useState(user.role);
   const [password, setPassword] = useState('');
   const [canViewStats, setCanViewStats] = useState(user.can_view_stats || false);
   const [canManageCats, setCanManageCats] = useState(user.can_manage_categories || false);
+  const [canViewAllTasks, setCanViewAllTasks] = useState(user.can_view_all_tasks || false);
+  const [assignableUserIds, setAssignableUserIds] = useState<string[]>(user.assignable_user_ids || []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -1395,7 +1425,7 @@ function EditUserModal({ user, onClose, onUpdated }: { user: User; onClose: () =
     e.preventDefault();
     setLoading(true); setError('');
     try {
-      const payload: any = { id: user.id, full_name: fullName, role, can_view_stats: canViewStats, can_manage_categories: canManageCats };
+      const payload: any = { id: user.id, full_name: fullName, role, can_view_stats: canViewStats, can_manage_categories: canManageCats, can_view_all_tasks: canViewAllTasks, assignable_user_ids: assignableUserIds };
       if (password.trim() !== '') {
         payload.password = password; // Only send password if user typed a new one
       }
@@ -1422,16 +1452,36 @@ function EditUserModal({ user, onClose, onUpdated }: { user: User; onClose: () =
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Completo *</label><input value={fullName} onChange={e => setFullName(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" required /></div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Rol *</label>
-            <select value={role} onChange={e => setRole(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl">
+            <select value={role} onChange={e => setRole(e.target.value as 'admin' | 'assigner' | 'executor')} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl">
               <option value="admin">Administrador</option>
               <option value="assigner">Asignador</option>
               <option value="executor">Ejecutor</option>
             </select>
           </div>
           {role === 'assigner' && (
-            <div className="space-y-2">
+            <div className="space-y-2 p-3 bg-gray-50 rounded-xl border border-gray-100">
+              <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Permisos Opcionales</p>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canViewStats} onChange={e => setCanViewStats(e.target.checked)} className="rounded" /> Puede ver estadísticas</label>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canManageCats} onChange={e => setCanManageCats(e.target.checked)} className="rounded" /> Puede gestionar categorías</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canViewAllTasks} onChange={e => setCanViewAllTasks(e.target.checked)} className="rounded text-blue-600" /> <span className="font-medium text-blue-700">Supervisión Global (Ver todas)</span></label>
+            </div>
+          )}
+          {role === 'executor' && (
+            <div className="space-y-2 p-3 bg-gray-50 rounded-xl border border-gray-100">
+              <p className="text-xs font-semibold text-gray-500 uppercase">Delegación (Líder de Equipo)</p>
+              <p className="text-xs text-gray-500 mb-2">Selecciona a quién puede asignar tareas este ejecutor:</p>
+              <div className="max-h-32 overflow-y-auto space-y-1 bg-white border border-gray-200 rounded-lg p-2">
+                {users.filter(u => u.id !== user.id).length === 0 && <p className="text-xs text-gray-400">No hay otros usuarios</p>}
+                {users.filter(u => u.id !== user.id).map(u => (
+                  <label key={u.id} className="flex items-center gap-2 text-sm p-1 hover:bg-gray-50 rounded cursor-pointer">
+                    <input type="checkbox" checked={assignableUserIds.includes(u.id)} onChange={e => {
+                      if (e.target.checked) setAssignableUserIds([...assignableUserIds, u.id]);
+                      else setAssignableUserIds(assignableUserIds.filter(id => id !== u.id));
+                    }} className="rounded" />
+                    {u.full_name} <span className="text-xs text-gray-400">({u.role})</span>
+                  </label>
+                ))}
+              </div>
             </div>
           )}
           <div className="border-t border-gray-100 pt-4 mt-2">

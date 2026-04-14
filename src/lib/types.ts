@@ -8,6 +8,8 @@ export interface User {
   role: UserRole;
   can_view_stats: boolean;
   can_manage_categories: boolean;
+  can_view_all_tasks: boolean;
+  assignable_user_ids: string[];
   active: boolean;
   created_at: string;
 }
@@ -77,6 +79,8 @@ export interface AuthSession {
   role: UserRole;
   canViewStats: boolean;
   canManageCategories: boolean;
+  canViewAllTasks: boolean;
+  assignableUserIds: string[];
 }
 
 export interface StatsOverview {

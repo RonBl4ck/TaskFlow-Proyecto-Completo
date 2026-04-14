@@ -10,10 +10,14 @@ export async function GET(request: NextRequest) {
     const myTasks = searchParams.get('myTasks') === 'true';
 
     let tasks;
-    if (myTasks || session.role === 'executor') {
+    if (myTasks) {
       tasks = getTasksByAssignee(session.userId);
-    } else {
+    } else if (session.role === 'admin' || session.canViewAllTasks) {
       tasks = getAllTasks();
+    } else if (session.role === 'assigner') {
+      tasks = getAllTasks().filter(t => t.created_by === session.userId || t.assigned_user_id === session.userId);
+    } else {
+      tasks = getTasksByAssignee(session.userId);
     }
 
     // Enrich with category info
@@ -42,12 +46,24 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole('admin', 'assigner');
+    const { requireAuth } = await import('@/lib/auth');
+    const session = await requireAuth();
     const body = await request.json();
     const { title, description, assigned_user_id, status, priority, deadline, category_ids } = body;
 
     if (!title || !assigned_user_id) {
       return NextResponse.json({ error: 'Título y usuario asignado son requeridos' }, { status: 400 });
+    }
+
+    if (session.role === 'executor') {
+      if (!session.assignableUserIds || session.assignableUserIds.length === 0) {
+        return NextResponse.json({ error: 'Sin permisos para asignar tareas' }, { status: 403 });
+      }
+      if (!session.assignableUserIds.includes(assigned_user_id)) {
+        return NextResponse.json({ error: 'No tienes permiso para asignar a este usuario' }, { status: 403 });
+      }
+    } else if (session.role !== 'admin' && session.role !== 'assigner') {
+      return NextResponse.json({ error: 'Rol inválido para crear tareas' }, { status: 403 });
     }
 
     const task = createTask({
