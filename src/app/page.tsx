@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { AuthSession, User, Task, Category, TaskWithDetails } from '@/lib/types';
+import Image from 'next/image';
+
 
 type Page = 'login' | 'my-tasks' | 'assign-tasks' | 'task-detail' | 'statistics' | 'admin';
 
@@ -118,11 +120,13 @@ function LoginPage({ onLogin }: { onLogin: (u: string, p: string) => Promise<boo
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-white/20 backdrop-blur-sm rounded-2xl mb-4">
-            <span className="text-4xl">📋</span>
+          <div className="flex justify-center mb-6">
+            <div className="bg-white p-4 rounded-2xl shadow-lg inline-block">
+              <Image src="/logo.png" alt="Banco Mundial Logo" width={180} height={60} className="object-contain" priority />
+            </div>
           </div>
-          <h1 className="text-3xl font-bold text-white">TaskFlow</h1>
-          <p className="text-blue-200 mt-2">Gestión de Tareas para Equipos</p>
+          <h1 className="text-3xl font-bold text-white mt-2">TaskFlow</h1>
+          <p className="text-blue-200 mt-2">Sistema Integrado de Gestión</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-2xl p-8 space-y-6">
@@ -170,23 +174,6 @@ function LoginPage({ onLogin }: { onLogin: (u: string, p: string) => Promise<boo
             {loading ? 'Ingresando...' : 'Ingresar'}
           </button>
 
-          <div className="border-t border-gray-100 pt-4">
-            <p className="text-xs text-gray-400 text-center">Cuentas de prueba disponibles</p>
-            <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-              <div className="bg-blue-50 rounded-lg p-2 text-center">
-                <p className="font-semibold text-blue-700">Admin</p>
-                <p className="text-blue-500">admin / admin123</p>
-              </div>
-              <div className="bg-green-50 rounded-lg p-2 text-center">
-                <p className="font-semibold text-green-700">Asignador</p>
-                <p className="text-green-500">jefe / jefe123</p>
-              </div>
-              <div className="bg-purple-50 rounded-lg p-2 text-center">
-                <p className="font-semibold text-purple-700">Ejecutor</p>
-                <p className="text-purple-500">maria / maria123</p>
-              </div>
-            </div>
-          </div>
         </form>
       </div>
     </div>
@@ -1253,6 +1240,8 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
         <div>
           <button onClick={() => setShowCreateUser(true)} className="mb-4 px-5 py-2.5 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors">+ Nuevo Usuario</button>
           {showCreateUser && <CreateUserModal onClose={() => setShowCreateUser(false)} onCreated={handleCreateUser} />}
+          {editUser && <EditUserModal user={editUser} onClose={() => setEditUser(null)} onUpdated={() => { setEditUser(null); loadData(); refresh(); }} />}
+
 
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
             <table className="w-full">
@@ -1290,7 +1279,8 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
                     <td className="px-4 py-3 text-center">
                       <input type="checkbox" checked={user.can_manage_categories} onChange={e => handleToggleUserCats(user.id, e.target.checked)} className="w-4 h-4 rounded text-blue-600" />
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <button onClick={() => setEditUser(user)} className="text-blue-600 hover:text-blue-800 text-sm mr-3 font-medium">Editar</button>
                       <button onClick={() => handleDeleteUser(user.id)} className="text-red-400 hover:text-red-600 text-sm">Desactivar</button>
                     </td>
                   </tr>
@@ -1390,6 +1380,75 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
     </div>
   );
 }
+
+// =================== EDIT USER MODAL ===================
+function EditUserModal({ user, onClose, onUpdated }: { user: User; onClose: () => void; onUpdated: () => void }) {
+  const [fullName, setFullName] = useState(user.full_name);
+  const [role, setRole] = useState(user.role);
+  const [password, setPassword] = useState('');
+  const [canViewStats, setCanViewStats] = useState(user.can_view_stats || false);
+  const [canManageCats, setCanManageCats] = useState(user.can_manage_categories || false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true); setError('');
+    try {
+      const payload: any = { id: user.id, full_name: fullName, role, can_view_stats: canViewStats, can_manage_categories: canManageCats };
+      if (password.trim() !== '') {
+        payload.password = password; // Only send password if user typed a new one
+      }
+      
+      const res = await fetch('/api/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) { onUpdated(); } else { setError(data.error || 'Error'); }
+    } catch { setError('Error al actualizar'); } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+          <h2 className="text-xl font-bold">Editar Usuario</h2>
+          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">@{user.username}</span>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {error && <div className="bg-red-50 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>}
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Completo *</label><input value={fullName} onChange={e => setFullName(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" required /></div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Rol *</label>
+            <select value={role} onChange={e => setRole(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl">
+              <option value="admin">Administrador</option>
+              <option value="assigner">Asignador</option>
+              <option value="executor">Ejecutor</option>
+            </select>
+          </div>
+          {role === 'assigner' && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canViewStats} onChange={e => setCanViewStats(e.target.checked)} className="rounded" /> Puede ver estadísticas</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canManageCats} onChange={e => setCanManageCats(e.target.checked)} className="rounded" /> Puede gestionar categorías</label>
+            </div>
+          )}
+          <div className="border-t border-gray-100 pt-4 mt-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Nueva Contraseña <span className="text-gray-400 font-normal">(Opcional)</span></label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Dejar en blanco para no cambiar" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl place" />
+            <p className="text-xs text-gray-500 mt-1">Si escribes algo aquí, la contraseña de este usuario cambiará.</p>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl font-medium">Cancelar</button>
+            <button type="submit" disabled={loading} className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl disabled:opacity-50 font-medium">{loading ? 'Guardando...' : 'Guardar Cambios'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 
 // =================== CREATE CATEGORY MODAL ===================
 function CreateCategoryModal({ categories, onClose, onCreated }: { categories: Category[]; onClose: () => void; onCreated: () => void }) {
