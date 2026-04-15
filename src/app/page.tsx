@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { AuthSession, User, Task, Category, TaskWithDetails } from '@/lib/types';
+import { AuthSession, User, Task, Category, TaskWithDetails, SidebarBroadcast } from '@/lib/types';
 import Image from 'next/image';
 
 
@@ -191,20 +191,51 @@ function Sidebar({ session, currentPage, collapsed, onNavigate, onToggle, onLogo
   refreshKey: number;
 }) {
   const [unreadCount, setUnreadCount] = useState(0);
+  const [sidebarGifState, setSidebarGifState] = useState<'idle' | 'busy' | 'done'>('idle');
+  const [broadcast, setBroadcast] = useState<SidebarBroadcast | null>(null);
 
   useEffect(() => {
-    if (session.role === 'executor') {
-      fetch('/api/tasks?myTasks=true')
-        .then(r => r.json())
-        .then(data => {
-          const tasksWithUpdates = data.tasks?.filter((t: Task) =>
-            t.status !== 'closed' && t.status !== 'rejected'
-          );
-          setUnreadCount(tasksWithUpdates?.length || 0);
-        })
-        .catch(() => {});
-    }
-  }, [session.role, refreshKey]);
+    const tasksUrl = session.role === 'executor' ? '/api/tasks?myTasks=true' : '/api/tasks';
+
+    Promise.all([
+      fetch(tasksUrl).then(r => r.json()),
+      fetch('/api/sidebar-broadcast').then(r => r.json()).catch(() => ({ broadcast: null })),
+    ])
+      .then(([tasksData, broadcastData]) => {
+        const visibleTasks: Task[] = tasksData.tasks || [];
+        const activeTasks = visibleTasks.filter((t: Task) =>
+          t.status === 'pending' || t.status === 'in_progress' || t.status === 'waiting_approval'
+        );
+        const finishedTasks = visibleTasks.filter((t: Task) =>
+          t.status === 'closed' || t.status === 'rejected'
+        );
+
+        setUnreadCount(session.role === 'executor' ? activeTasks.length : 0);
+        setBroadcast(broadcastData.broadcast || null);
+
+        if (activeTasks.length > 0) {
+          setSidebarGifState('busy');
+        } else if (finishedTasks.length > 0) {
+          setSidebarGifState('done');
+        } else {
+          setSidebarGifState('idle');
+        }
+      })
+      .catch(() => {
+        setUnreadCount(0);
+        setSidebarGifState('idle');
+        setBroadcast(null);
+      });
+  }, [session.role, refreshKey, session.excludeSidebarBroadcast]);
+
+  const personalSidebarGifUrl =
+    sidebarGifState === 'busy'
+      ? session.sidebarGifBusy || session.sidebarGifIdle || session.sidebarGifDone
+      : sidebarGifState === 'done'
+        ? session.sidebarGifDone || session.sidebarGifBusy || session.sidebarGifIdle
+        : session.sidebarGifIdle || session.sidebarGifBusy || session.sidebarGifDone;
+  const sidebarGifUrl = broadcast?.gif_url || personalSidebarGifUrl || null;
+  const sidebarMessage = broadcast?.message || null;
 
   const menuItems: { page: Page; label: string; icon: string; show: boolean; badge?: number }[] = [
     { page: 'my-tasks', label: 'Mis Tareas', icon: '📋', show: true, badge: session.role === 'executor' ? unreadCount : undefined },
@@ -251,13 +282,46 @@ function Sidebar({ session, currentPage, collapsed, onNavigate, onToggle, onLogo
 
       <div className="border-t border-gray-700 p-3">
         {!collapsed ? (
-          <div className="flex items-center gap-3 mb-3 px-2">
-            <div className="w-9 h-9 bg-blue-500 rounded-full flex items-center justify-center font-bold text-sm">
-              {session.fullName.charAt(0)}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-sm truncate">{session.fullName}</p>
-              <p className="text-xs text-gray-400 capitalize">{session.role === 'assigner' ? 'Asignador' : session.role === 'admin' ? 'Administrador' : 'Ejecutor'}</p>
+          <div className="px-2">
+            {sidebarGifUrl && (
+              <div className="mb-4 overflow-hidden rounded-2xl border border-gray-700 bg-gray-800/70">
+                {isLoopableVideo(sidebarGifUrl) ? (
+                  <video
+                    src={sidebarGifUrl}
+                    className="h-40 w-full object-cover"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                  />
+                ) : (
+                  <img
+                    src={sidebarGifUrl}
+                    alt={broadcast ? 'Mensaje global del equipo' : `Animacion de ${session.fullName}`}
+                    className="h-40 w-full object-cover"
+                  />
+                )}
+              </div>
+            )}
+            {sidebarMessage && (
+              <div className="mb-4 rounded-2xl border border-blue-500/30 bg-blue-500/10 px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-300">Mensaje global</p>
+                <p className="mt-1 text-sm leading-5 text-blue-50">{sidebarMessage}</p>
+              </div>
+            )}
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-9 h-9 bg-blue-500 rounded-full flex items-center justify-center font-bold text-sm">
+                {session.fullName.charAt(0)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm truncate">{session.fullName}</p>
+                <p className="text-xs text-gray-400 capitalize">{session.role === 'assigner' ? 'Asignador' : session.role === 'admin' ? 'Administrador' : 'Ejecutor'}</p>
+                {!broadcast && personalSidebarGifUrl && (
+                  <p className="text-[11px] text-blue-300 mt-1">
+                    {sidebarGifState === 'busy' ? 'Con tareas activas' : sidebarGifState === 'done' ? 'Todo al dia' : 'Zona tranquila'}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         ) : (
@@ -462,6 +526,11 @@ function getDeadlineDisplay(deadline: string | null) {
   return { text: `${diff}d restantes`, color: 'text-green-600' };
 }
 
+function isLoopableVideo(url: string | null) {
+  if (!url) return false;
+  return /\.(mp4|webm)(\?.*)?$/i.test(url);
+}
+
 // =================== ASSIGN TASKS PAGE ===================
 function AssignTasksPage({ session, onViewTask, refreshKey }: { session: AuthSession; onViewTask: (id: string) => void; refreshKey: number }) {
   const [tasks, setTasks] = useState<TaskWithDetails[]>([]);
@@ -469,6 +538,8 @@ function AssignTasksPage({ session, onViewTask, refreshKey }: { session: AuthSes
   const [showCreate, setShowCreate] = useState(false);
   const [filter, setFilter] = useState<string>('all');
   const [users, setUsers] = useState<User[]>([]);
+  const [assignedFilter, setAssignedFilter] = useState('all');
+  const [createdByFilter, setCreatedByFilter] = useState('all');
 
   useEffect(() => {
     Promise.all([
@@ -480,7 +551,15 @@ function AssignTasksPage({ session, onViewTask, refreshKey }: { session: AuthSes
     }).catch(() => {}).finally(() => setLoading(false));
   }, [refreshKey]);
 
-  const filteredTasks = filter === 'all' ? tasks : tasks.filter(t => t.status === filter);
+  const filteredTasks = tasks.filter(task => {
+    const matchesStatus = filter === 'all' ? true : task.status === filter;
+    const matchesAssigned = assignedFilter === 'all' ? true : task.assigned_user_id === assignedFilter;
+    const matchesCreatedBy = createdByFilter === 'all' ? true : task.created_by === createdByFilter;
+    return matchesStatus && matchesAssigned && matchesCreatedBy;
+  });
+  const getTaskCountForFilter = (filterKey: string) => filterKey === 'all' ? tasks.length : tasks.filter(t => t.status === filterKey).length;
+  const creatorOptions = users.filter(u => tasks.some(t => t.created_by === u.id));
+  const assigneeOptions = users.filter(u => tasks.some(t => t.assigned_user_id === u.id));
 
   return (
     <div>
@@ -512,9 +591,26 @@ function AssignTasksPage({ session, onViewTask, refreshKey }: { session: AuthSes
           { key: 'closed', label: 'Cerradas' },
         ].map(f => (
           <button key={f.key} onClick={() => setFilter(f.key)} className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${filter === f.key ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>
-            {f.label} ({filter === 'all' ? tasks.length : tasks.filter(t => t.status === f.key).length})
+            {f.label} ({getTaskCountForFilter(f.key)})
           </button>
         ))}
+      </div>
+
+      <div className="grid gap-3 mb-6 md:grid-cols-2">
+        <div className="bg-white border border-gray-200 rounded-xl p-3">
+          <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Filtrar por asignado</label>
+          <select value={assignedFilter} onChange={e => setAssignedFilter(e.target.value)} className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="all">Todos los asignados</option>
+            {assigneeOptions.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+          </select>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-3">
+          <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Filtrar por creador</label>
+          <select value={createdByFilter} onChange={e => setCreatedByFilter(e.target.value)} className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="all">Todos los creadores</option>
+            {creatorOptions.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+          </select>
+        </div>
       </div>
 
       {loading ? (
@@ -536,7 +632,8 @@ function AssignTasksPage({ session, onViewTask, refreshKey }: { session: AuthSes
                     <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium border ${getStatusInfo(task.status).classes}`}>{getStatusInfo(task.status).label}</span>
                   </div>
                   <div className="flex items-center gap-3 mt-2 text-xs text-gray-500 flex-wrap">
-                    <span>👤 {task.assigned_user_id}</span>
+                    <span>👤 {task.assigned_user?.full_name || task.assigned_user?.username || task.assigned_user_id}</span>
+                    {task.created_by_user?.full_name && <span>📝 {task.created_by_user.full_name}</span>}
                     {(task.categories?.length ?? 0) > 0 && <span>🏷️ {task.categories!.map(c => c.name).join(', ')}</span>}
                     {task.deadline && <span className={getDeadlineDisplay(task.deadline)?.color}>📅 {new Date(task.deadline).toLocaleDateString('es')}</span>}
                   </div>
@@ -776,6 +873,18 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
     fetch(`/api/tasks/${taskId}`).then(r => r.json()).then(d => setTask(d.task));
   };
 
+  const handleDeleteTask = async () => {
+    if (!confirm('¿Eliminar esta tarea definitivamente? Esta acción no se puede deshacer.')) return;
+    const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      refresh();
+      onBack();
+    } else {
+      setError(data.error || 'No se pudo eliminar la tarea');
+    }
+  };
+
   if (loading) return <div className="flex items-center justify-center py-20"><div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>;
   if (!task) return <div className="text-center py-20 text-gray-500">Tarea no encontrada</div>;
 
@@ -812,7 +921,7 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
               </div>
             )}
           </div>
-          {(session.role === 'admin' || session.role === 'assigner' || task.created_by_user_id === session.userId) && (
+          {(session.role === 'admin' || session.role === 'assigner' || task.created_by === session.userId) && (
             <div className="flex flex-col gap-2">
               {task.status === 'waiting_approval' && (
                 <>
@@ -825,6 +934,12 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
           )}
         </div>
       </div>
+
+      {session.role === 'admin' && (
+        <div className="mb-6 flex justify-end">
+          <button onClick={handleDeleteTask} className="px-4 py-2 bg-red-50 text-red-600 text-sm rounded-lg hover:bg-red-100 transition-colors border border-red-200">🗑️ Eliminar tarea</button>
+        </div>
+      )}
 
       {/* Reassign Modal */}
       {showReassign && (
@@ -1179,9 +1294,10 @@ import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Cart
 
 // =================== ADMIN PAGE ===================
 function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => void }) {
-  const [tab, setTab] = useState<'users' | 'categories'>('users');
+  const [tab, setTab] = useState<'users' | 'categories' | 'sidebar'>('users');
   const [users, setUsers] = useState<User[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [broadcast, setBroadcast] = useState<SidebarBroadcast | null>(null);
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [showCreateCat, setShowCreateCat] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
@@ -1190,9 +1306,11 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
     Promise.all([
       fetch('/api/users').then(r => r.json()),
       fetch('/api/categories').then(r => r.json()),
-    ]).then(([usersData, catsData]) => {
+      fetch('/api/sidebar-broadcast?mode=admin').then(r => r.json()).catch(() => ({ broadcast: null })),
+    ]).then(([usersData, catsData, broadcastData]) => {
       setUsers(usersData.users || []);
       setCategories(catsData.categories || []);
+      setBroadcast(broadcastData.broadcast || null);
     }).catch(() => {});
   };
 
@@ -1239,6 +1357,9 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
         </button>
         <button onClick={() => setTab('categories')} className={`px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${tab === 'categories' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200'}`}>
           🏷️ Categorías ({categories.length})
+        </button>
+        <button onClick={() => setTab('sidebar')} className={`px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${tab === 'sidebar' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200'}`}>
+          🎬 Sidebar Global
         </button>
       </div>
 
@@ -1325,6 +1446,145 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
           </div>
         </div>
       )}
+
+      {tab === 'sidebar' && (
+        <SidebarBroadcastPanel users={users} broadcast={broadcast} onSaved={loadData} />
+      )}
+    </div>
+  );
+}
+
+function SidebarBroadcastPanel({ users, broadcast, onSaved }: { users: User[]; broadcast: SidebarBroadcast | null; onSaved: () => void }) {
+  const [message, setMessage] = useState(broadcast?.message || '');
+  const [gifUrl, setGifUrl] = useState(broadcast?.gif_url || '');
+  const [active, setActive] = useState(broadcast?.active || false);
+  const [excludedUserIds, setExcludedUserIds] = useState<string[]>(broadcast?.excluded_user_ids || []);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    setMessage(broadcast?.message || '');
+    setGifUrl(broadcast?.gif_url || '');
+    setActive(broadcast?.active || false);
+    setExcludedUserIds(broadcast?.excluded_user_ids || []);
+  }, [broadcast]);
+
+  const handleSave = async (nextActive: boolean = active) => {
+    setLoading(true);
+    setStatus('');
+    try {
+      const res = await fetch('/api/sidebar-broadcast', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          gif_url: gifUrl,
+          active: nextActive,
+          excluded_user_ids: excludedUserIds,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setActive(nextActive);
+        setStatus(nextActive ? 'Broadcast global activado.' : 'Broadcast global guardado sin activar.');
+        onSaved();
+      } else {
+        setStatus(data.error || 'No se pudo guardar el broadcast.');
+      }
+    } catch {
+      setStatus('Error de conexión al guardar el broadcast.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+      <div className="bg-white rounded-2xl border border-gray-200 p-6">
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <h3 className="text-lg font-bold text-gray-800">Broadcast Global del Sidebar</h3>
+            <p className="text-sm text-gray-500 mt-1">Reemplaza temporalmente los gifs normales con un mensaje y gif general.</p>
+          </div>
+          <span className={`text-xs px-3 py-1 rounded-full font-medium ${active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+            {active ? 'Activo' : 'Inactivo'}
+          </span>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Mensaje global</label>
+            <textarea value={message} onChange={e => setMessage(e.target.value)} rows={3} className="w-full px-4 py-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ejemplo: Equipo, hoy priorizamos cierres y validaciones finales." />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">URL del gif global</label>
+            <input value={gifUrl} onChange={e => setGifUrl(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="https://..." />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Excluir usuarios</label>
+            <div className="max-h-56 overflow-y-auto rounded-xl border border-gray-200 p-3 space-y-2">
+              {users.map(u => (
+                <label key={u.id} className="flex items-center gap-3 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={excludedUserIds.includes(u.id) || !!u.exclude_sidebar_broadcast}
+                    disabled={!!u.exclude_sidebar_broadcast}
+                    onChange={e => {
+                      if (e.target.checked) setExcludedUserIds(prev => [...prev, u.id]);
+                      else setExcludedUserIds(prev => prev.filter(id => id !== u.id));
+                    }}
+                    className="rounded"
+                  />
+                  <span className="font-medium">{u.full_name}</span>
+                  <span className="text-xs text-gray-400">@{u.username}</span>
+                  {u.exclude_sidebar_broadcast && <span className="text-[11px] text-amber-600">Exclusión fija</span>}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-2">Los usuarios marcados con exclusión fija nunca recibirán el broadcast global.</p>
+          </div>
+          {status && <div className="rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-700">{status}</div>}
+          <div className="flex flex-wrap gap-3">
+            <button type="button" onClick={() => handleSave(false)} disabled={loading} className="px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium disabled:opacity-50">
+              Guardar sin activar
+            </button>
+            <button type="button" onClick={() => handleSave(true)} disabled={loading} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white font-medium disabled:opacity-50">
+              {loading ? 'Guardando...' : 'Activar para todos'}
+            </button>
+            {active && (
+              <button type="button" onClick={() => handleSave(false)} disabled={loading} className="px-4 py-2.5 rounded-xl bg-red-50 text-red-600 font-medium border border-red-200 disabled:opacity-50">
+                Desactivar
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 p-6">
+        <h3 className="text-lg font-bold text-gray-800">Vista Previa</h3>
+        <p className="text-sm text-gray-500 mt-1 mb-4">Así se vería en la barra lateral cuando el broadcast esté activo.</p>
+        <div className="rounded-[28px] bg-gray-900 p-4 text-white">
+          {gifUrl ? (
+            <div className="mb-4 overflow-hidden rounded-2xl border border-gray-700 bg-gray-800/70">
+              <img src={gifUrl} alt="Vista previa del gif global" className="h-40 w-full object-cover" />
+            </div>
+          ) : (
+            <div className="mb-4 rounded-2xl border border-dashed border-gray-700 bg-gray-800/40 px-4 py-10 text-center text-sm text-gray-400">
+              Sin gif global
+            </div>
+          )}
+          {message ? (
+            <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-300">Mensaje global</p>
+              <p className="mt-1 text-sm leading-5 text-blue-50">{message}</p>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-gray-700 px-4 py-6 text-sm text-gray-400">
+              Sin mensaje global
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1339,6 +1599,10 @@ function CreateUserModal({ users, onClose, onCreated }: { users: User[]; onClose
   const [canManageCats, setCanManageCats] = useState(false);
   const [canViewAllTasks, setCanViewAllTasks] = useState(false);
   const [assignableUserIds, setAssignableUserIds] = useState<string[]>([]);
+  const [sidebarGifIdle, setSidebarGifIdle] = useState('');
+  const [sidebarGifBusy, setSidebarGifBusy] = useState('');
+  const [sidebarGifDone, setSidebarGifDone] = useState('');
+  const [excludeSidebarBroadcast, setExcludeSidebarBroadcast] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -1349,7 +1613,20 @@ function CreateUserModal({ users, onClose, onCreated }: { users: User[]; onClose
       const res = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, full_name: fullName, role, can_view_stats: canViewStats, can_manage_categories: canManageCats, can_view_all_tasks: canViewAllTasks, assignable_user_ids: assignableUserIds }),
+        body: JSON.stringify({
+          username,
+          password,
+          full_name: fullName,
+          role,
+          can_view_stats: canViewStats,
+          can_manage_categories: canManageCats,
+          can_view_all_tasks: canViewAllTasks,
+          assignable_user_ids: assignableUserIds,
+          sidebar_gif_idle: sidebarGifIdle,
+          sidebar_gif_busy: sidebarGifBusy,
+          sidebar_gif_done: sidebarGifDone,
+          exclude_sidebar_broadcast: excludeSidebarBroadcast,
+        }),
       });
       const data = await res.json();
       if (data.success) { onCreated(); } else { setError(data.error || 'Error'); }
@@ -1365,6 +1642,24 @@ function CreateUserModal({ users, onClose, onCreated }: { users: User[]; onClose
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Completo *</label><input value={fullName} onChange={e => setFullName(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" required /></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Usuario *</label><input value={username} onChange={e => setUsername(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" required /></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Contraseña *</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" required /></div>
+          <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">GIF lateral en reposo</label>
+              <input value={sidebarGifIdle} onChange={e => setSidebarGifIdle(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" placeholder="https://..." />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">GIF lateral con tareas activas</label>
+              <input value={sidebarGifBusy} onChange={e => setSidebarGifBusy(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" placeholder="https://..." />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">GIF lateral al día</label>
+              <input value={sidebarGifDone} onChange={e => setSidebarGifDone(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" placeholder="https://..." />
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={excludeSidebarBroadcast} onChange={e => setExcludeSidebarBroadcast(e.target.checked)} className="rounded" />
+              Excluir siempre de mensajes globales del sidebar
+            </label>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Rol *</label>
             <select value={role} onChange={e => setRole(e.target.value as 'admin' | 'assigner' | 'executor')} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl">
@@ -1418,6 +1713,10 @@ function EditUserModal({ users, user, onClose, onUpdated }: { users: User[]; use
   const [canManageCats, setCanManageCats] = useState(user.can_manage_categories || false);
   const [canViewAllTasks, setCanViewAllTasks] = useState(user.can_view_all_tasks || false);
   const [assignableUserIds, setAssignableUserIds] = useState<string[]>(user.assignable_user_ids || []);
+  const [sidebarGifIdle, setSidebarGifIdle] = useState(user.sidebar_gif_idle || '');
+  const [sidebarGifBusy, setSidebarGifBusy] = useState(user.sidebar_gif_busy || '');
+  const [sidebarGifDone, setSidebarGifDone] = useState(user.sidebar_gif_done || '');
+  const [excludeSidebarBroadcast, setExcludeSidebarBroadcast] = useState(user.exclude_sidebar_broadcast || false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -1425,7 +1724,19 @@ function EditUserModal({ users, user, onClose, onUpdated }: { users: User[]; use
     e.preventDefault();
     setLoading(true); setError('');
     try {
-      const payload: any = { id: user.id, full_name: fullName, role, can_view_stats: canViewStats, can_manage_categories: canManageCats, can_view_all_tasks: canViewAllTasks, assignable_user_ids: assignableUserIds };
+      const payload: any = {
+        id: user.id,
+        full_name: fullName,
+        role,
+        can_view_stats: canViewStats,
+        can_manage_categories: canManageCats,
+        can_view_all_tasks: canViewAllTasks,
+        assignable_user_ids: assignableUserIds,
+        sidebar_gif_idle: sidebarGifIdle,
+        sidebar_gif_busy: sidebarGifBusy,
+        sidebar_gif_done: sidebarGifDone,
+        exclude_sidebar_broadcast: excludeSidebarBroadcast,
+      };
       if (password.trim() !== '') {
         payload.password = password; // Only send password if user typed a new one
       }
@@ -1484,6 +1795,24 @@ function EditUserModal({ users, user, onClose, onUpdated }: { users: User[]; use
               </div>
             </div>
           )}
+          <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">GIF lateral en reposo</label>
+              <input value={sidebarGifIdle} onChange={e => setSidebarGifIdle(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" placeholder="https://..." />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">GIF lateral con tareas activas</label>
+              <input value={sidebarGifBusy} onChange={e => setSidebarGifBusy(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" placeholder="https://..." />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">GIF lateral al día</label>
+              <input value={sidebarGifDone} onChange={e => setSidebarGifDone(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" placeholder="https://..." />
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={excludeSidebarBroadcast} onChange={e => setExcludeSidebarBroadcast(e.target.checked)} className="rounded" />
+              Excluir siempre de mensajes globales del sidebar
+            </label>
+          </div>
           <div className="border-t border-gray-100 pt-4 mt-2">
             <label className="block text-sm font-medium text-gray-700 mb-1">Nueva Contraseña <span className="text-gray-400 font-normal">(Opcional)</span></label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Dejar en blanco para no cambiar" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl place" />

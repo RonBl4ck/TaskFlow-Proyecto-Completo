@@ -2,10 +2,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireRole } from '@/lib/auth';
 import { createTaskUpdate, softDeleteUpdate, getTaskUpdates } from '@/lib/db';
 
+function canManageDelegatedTask(session: { role: string; userId: string; assignableUserIds?: string[] }, task: { created_by: string; assigned_user_id: string }) {
+  return session.role === 'executor' &&
+    task.created_by === session.userId &&
+    (session.assignableUserIds || []).includes(task.assigned_user_id);
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireRole('admin', 'assigner', 'executor');
     const { id } = await params;
+    const { getTaskById } = await import('@/lib/db');
+    const task = await getTaskById(id);
+    if (!task) {
+      return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
+    }
+    const delegatedManager = canManageDelegatedTask(session, task);
+    if (session.role === 'executor' && task.assigned_user_id !== session.userId && !delegatedManager) {
+      return NextResponse.json({ error: 'Sin permisos' }, { status: 403 });
+    }
     const updatesRaw = await getTaskUpdates(id);
     const updates = await Promise.all(updatesRaw.map(async u => {
       const { getUserById } = require('@/lib/db');
@@ -24,6 +39,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     const body = await request.json();
     const { comment, hours_spent, time_type, attachment_url } = body;
+    const { getTaskById, updateTask } = await import('@/lib/db');
+    const task = await getTaskById(id);
+
+    if (!task) {
+      return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
+    }
+
+    const delegatedManager = canManageDelegatedTask(session, task);
+    if (session.role === 'executor' && task.assigned_user_id !== session.userId && !delegatedManager) {
+      return NextResponse.json({ error: 'Sin permisos' }, { status: 403 });
+    }
 
     if (!comment && hours_spent === 0 && !attachment_url) {
       return NextResponse.json({ error: 'Debes agregar un comentario, horas o un link' }, { status: 400 });
@@ -43,18 +69,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
 
     // If assigner/admin comments on in_progress task, change to pending
-    if ((session.role === 'assigner' || session.role === 'admin') && comment) {
-      const { getTaskById, updateTask } = await import('@/lib/db');
-      const task = await getTaskById(id);
+    if ((session.role === 'assigner' || session.role === 'admin' || delegatedManager) && comment) {
       if (task && task.status === 'in_progress') {
         await updateTask(id, { status: 'pending' });
       }
     }
 
     // If executor comments on pending task, change to in_progress
-    if (session.role === 'executor') {
-      const { getTaskById, updateTask } = await import('@/lib/db');
-      const task = await getTaskById(id);
+    if (session.role === 'executor' && task.assigned_user_id === session.userId) {
       if (task && task.status === 'pending') {
         await updateTask(id, { status: 'in_progress' });
       }

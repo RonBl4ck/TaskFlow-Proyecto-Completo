@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireRole } from '@/lib/auth';
 import { getTaskById, updateTask, createTaskUpdate } from '@/lib/db';
 
+function canManageDelegatedTask(session: { role: string; userId: string; assignableUserIds?: string[] }, task: { created_by: string; assigned_user_id: string }) {
+  return session.role === 'executor' &&
+    task.created_by === session.userId &&
+    (session.assignableUserIds || []).includes(task.assigned_user_id);
+}
+
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireRole('admin', 'assigner', 'executor');
@@ -14,8 +20,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
     }
 
+    const delegatedManager = canManageDelegatedTask(session, task);
+
     // Executor requests closure
-    if (action === 'request_closure' && (session.role === 'executor' || session.role === 'admin')) {
+    if (action === 'request_closure' && ((session.role === 'executor' && task.assigned_user_id === session.userId) || session.role === 'admin')) {
       if (task.status !== 'in_progress') {
         return NextResponse.json({ error: 'Solo se puede solicitar cierre de tareas en progreso' }, { status: 400 });
       }
@@ -34,7 +42,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     // Assigner/Admin approves closure
-    if (action === 'approve' && (session.role === 'assigner' || session.role === 'admin')) {
+    if (action === 'approve' && (session.role === 'assigner' || session.role === 'admin' || delegatedManager)) {
       if (task.status !== 'waiting_approval') {
         return NextResponse.json({ error: 'Solo se pueden aprobar tareas en espera de confirmación' }, { status: 400 });
       }
@@ -53,7 +61,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     // Assigner/Admin rejects closure
-    if (action === 'reject' && (session.role === 'assigner' || session.role === 'admin')) {
+    if (action === 'reject' && (session.role === 'assigner' || session.role === 'admin' || delegatedManager)) {
       if (task.status !== 'waiting_approval') {
         return NextResponse.json({ error: 'Solo se pueden rechazar tareas en espera de confirmación' }, { status: 400 });
       }

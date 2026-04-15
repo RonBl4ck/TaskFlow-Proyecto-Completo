@@ -34,15 +34,27 @@ export async function POST(request: NextRequest) {
       canManageCategories: user.can_manage_categories,
       canViewAllTasks: user.can_view_all_tasks || false,
       assignableUserIds: user.assignable_user_ids || [],
+      sidebarGifIdle: user.sidebar_gif_idle || null,
+      sidebarGifBusy: user.sidebar_gif_busy || null,
+      sidebarGifDone: user.sidebar_gif_done || null,
+      excludeSidebarBroadcast: user.exclude_sidebar_broadcast || false,
     });
 
     const response = NextResponse.json({
       success: true,
       user: {
-        id: user.id,
+        userId: user.id,
         username: user.username,
         fullName: user.full_name,
         role: user.role,
+        canViewStats: user.can_view_stats,
+        canManageCategories: user.can_manage_categories,
+        canViewAllTasks: user.can_view_all_tasks || false,
+        assignableUserIds: user.assignable_user_ids || [],
+        sidebarGifIdle: user.sidebar_gif_idle || null,
+        sidebarGifBusy: user.sidebar_gif_busy || null,
+        sidebarGifDone: user.sidebar_gif_done || null,
+        excludeSidebarBroadcast: user.exclude_sidebar_broadcast || false,
       },
     });
 

@@ -10,6 +10,10 @@ export interface User {
   can_manage_categories: boolean;
   can_view_all_tasks: boolean;
   assignable_user_ids: string[];
+  sidebar_gif_idle?: string | null;
+  sidebar_gif_busy?: string | null;
+  sidebar_gif_done?: string | null;
+  exclude_sidebar_broadcast?: boolean;
   active: boolean;
   created_at: string;
 }
@@ -81,6 +85,20 @@ export interface AuthSession {
   canManageCategories: boolean;
   canViewAllTasks: boolean;
   assignableUserIds: string[];
+  sidebarGifIdle?: string | null;
+  sidebarGifBusy?: string | null;
+  sidebarGifDone?: string | null;
+  excludeSidebarBroadcast?: boolean;
+}
+
+export interface SidebarBroadcast {
+  id: string;
+  message: string;
+  gif_url: string | null;
+  active: boolean;
+  excluded_user_ids: string[];
+  created_by: string | null;
+  updated_at: string;
 }
 
 export interface StatsOverview {

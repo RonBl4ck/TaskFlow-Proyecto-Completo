@@ -18,16 +18,21 @@ export async function GET(request: NextRequest) {
       const all = await getAllTasks();
       tasks = all.filter(t => t.created_by === session.userId || t.assigned_user_id === session.userId);
     } else {
-      tasks = await getTasksByAssignee(session.userId);
+      const all = await getAllTasks();
+      tasks = all.filter(t =>
+        t.assigned_user_id === session.userId ||
+        (t.created_by === session.userId && (session.assignableUserIds || []).includes(t.assigned_user_id))
+      );
     }
 
-    // Enrich with category info
-    const { getAllCategories, getTaskCategories } = await import('@/lib/db');
-    const categories = await getAllCategories();
+    // Enrich with category and user info for the UI.
+    const { getTaskCategories, getUserById } = await import('@/lib/db');
 
     const enriched = await Promise.all(tasks.map(async task => ({
       ...task,
       categories: await getTaskCategories(task.id),
+      assigned_user: await getUserById(task.assigned_user_id),
+      created_by_user: await getUserById(task.created_by),
     })));
 
     // Sort by priority and status

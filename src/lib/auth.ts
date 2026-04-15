@@ -20,7 +20,28 @@ export async function getSession(): Promise<AuthSession | null> {
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, SECRET);
-    return payload as unknown as AuthSession;
+    const session = payload as unknown as AuthSession;
+    const { getUserById } = await import('./db');
+    const freshUser = await getUserById(session.userId);
+
+    if (!freshUser || !freshUser.active) {
+      return null;
+    }
+
+    return {
+      userId: freshUser.id,
+      username: freshUser.username,
+      fullName: freshUser.full_name,
+      role: freshUser.role,
+      canViewStats: freshUser.can_view_stats,
+      canManageCategories: freshUser.can_manage_categories,
+      canViewAllTasks: freshUser.can_view_all_tasks || false,
+      assignableUserIds: freshUser.assignable_user_ids || [],
+      sidebarGifIdle: freshUser.sidebar_gif_idle || null,
+      sidebarGifBusy: freshUser.sidebar_gif_busy || null,
+      sidebarGifDone: freshUser.sidebar_gif_done || null,
+      excludeSidebarBroadcast: freshUser.exclude_sidebar_broadcast || false,
+    };
   } catch {
     return null;
   }

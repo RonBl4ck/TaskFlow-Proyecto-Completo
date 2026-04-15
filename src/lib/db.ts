@@ -1,4 +1,4 @@
-import { User, Task, TaskUpdate, Category, TaskCategory } from './types';
+import { User, Task, TaskUpdate, Category, TaskCategory, SidebarBroadcast } from './types';
 import { supabase } from './supabase';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
@@ -51,6 +51,50 @@ export async function deleteUser(id: string): Promise<boolean> {
   return !error;
 }
 
+// ============ SIDEBAR BROADCAST ============
+
+export async function getActiveSidebarBroadcast(): Promise<SidebarBroadcast | null> {
+  const { data, error } = await supabase
+    .from('sidebar_broadcast')
+    .select('*')
+    .eq('active', true)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return null;
+  return data || null;
+}
+
+export async function getLatestSidebarBroadcast(): Promise<SidebarBroadcast | null> {
+  const { data, error } = await supabase
+    .from('sidebar_broadcast')
+    .select('*')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return null;
+  return data || null;
+}
+
+export async function upsertSidebarBroadcast(data: Omit<SidebarBroadcast, 'updated_at'>): Promise<SidebarBroadcast> {
+  const payload = {
+    ...data,
+    excluded_user_ids: data.excluded_user_ids || [],
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data: saved, error } = await supabase
+    .from('sidebar_broadcast')
+    .upsert(payload)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  return saved;
+}
+
 // ============ TASKS ============
 
 export async function createTask(data: Omit<Task, 'id' | 'created_at' | 'updated_at' | 'closed_at'>): Promise<Task> {
@@ -73,6 +117,17 @@ export async function getTasksByAssignee(userId: string): Promise<Task[]> {
 export async function getAllTasks(): Promise<Task[]> {
   const { data } = await supabase.from('tasks').select('*').order('created_at', { ascending: false });
   return data || [];
+}
+
+export async function deleteTask(id: string): Promise<boolean> {
+  const { error: relationsError } = await supabase.from('task_categories').delete().eq('task_id', id);
+  if (relationsError) return false;
+
+  const { error: updatesError } = await supabase.from('task_updates').delete().eq('task_id', id);
+  if (updatesError) return false;
+
+  const { error: taskError } = await supabase.from('tasks').delete().eq('id', id);
+  return !taskError;
 }
 
 export async function updateTask(id: string, data: Partial<Task>): Promise<Task | null> {
