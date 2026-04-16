@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { AuthSession, User, Task, Category, TaskWithDetails, SidebarBroadcast } from '@/lib/types';
 import Image from 'next/image';
 
@@ -574,6 +574,24 @@ function AssignTasksPage({ session, onViewTask, refreshKey }: { session: AuthSes
   const creatorOptions = users.filter(u => tasks.some(t => t.created_by === u.id));
   const assigneeOptions = users.filter(u => tasks.some(t => t.assigned_user_id === u.id));
 
+  const selectableUsers = useMemo(() => {
+    const userMap = new Map<string, User>();
+    
+    // Filter users eligible for assignment
+    users
+      .filter(u => u.role === 'executor' || u.role === 'assigner')
+      .filter(u => session.role !== 'executor' || (session.assignableUserIds && session.assignableUserIds.includes(u.id)))
+      .forEach(u => userMap.set(u.id, u));
+    
+    // Ensure current user is always an option (self-assignment)
+    const currentUser = users.find(u => u.id === session.userId);
+    if (currentUser) {
+      userMap.set(currentUser.id, currentUser);
+    }
+    
+    return Array.from(userMap.values());
+  }, [users, session.role, session.assignableUserIds, session.userId]);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -588,13 +606,7 @@ function AssignTasksPage({ session, onViewTask, refreshKey }: { session: AuthSes
 
       {showCreate && (
         <CreateTaskModal 
-          users={
-            // Combine users and current user to ensure self-assignment is always possible
-            Array.from(new Map([
-              ...users.filter(u => u.role === 'executor' || u.role === 'assigner').filter(u => session.role !== 'executor' || (session.assignableUserIds && session.assignableUserIds.includes(u.id))).map(u => [u.id, u]),
-              [session.userId, users.find(u => u.id === session.userId)!]
-            ].filter(pair => pair[1])).values()) as User[]
-          } 
+          users={selectableUsers} 
           onClose={() => setShowCreate(false)} 
           onCreated={() => { setShowCreate(false); setTasks([]); fetch('/api/tasks').then(r => r.json()).then(d => setTasks(d.tasks || [])); }} 
         />
