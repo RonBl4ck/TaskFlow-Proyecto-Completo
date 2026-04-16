@@ -239,9 +239,9 @@ function Sidebar({ session, currentPage, collapsed, onNavigate, onToggle, onLogo
 
   const menuItems: { page: Page; label: string; icon: string; show: boolean; badge?: number }[] = [
     { page: 'my-tasks', label: 'Mis Tareas', icon: '📋', show: true, badge: session.role === 'executor' ? unreadCount : undefined },
-    { page: 'assign-tasks', label: 'Asignar Tareas', icon: '📤', show: session.role === 'admin' || session.role === 'assigner' || (session.assignableUserIds && session.assignableUserIds.length > 0) },
+    { page: 'assign-tasks', label: 'Asignar Tareas', icon: '📤', show: true },
     { page: 'statistics', label: 'Estadísticas', icon: '📊', show: session.role === 'admin' || session.canViewStats },
-    { page: 'admin', label: 'Administración', icon: '⚙️', show: session.role === 'admin' },
+    { page: 'admin', label: 'Administración', icon: '⚙️', show: session.role === 'admin' || (session.role === 'assigner' && session.canManageCategories) },
   ];
 
   return (
@@ -374,7 +374,7 @@ function MyTasksPage({ session, onViewTask, refreshKey }: { session: AuthSession
 
   useEffect(() => {
     setLoading(true);
-    const url = session.role === 'executor' ? '/api/tasks?myTasks=true' : '/api/tasks';
+    const url = '/api/tasks?myTasks=true';
     fetch(url)
       .then(r => r.json())
       .then(data => setTasks(data.tasks || []))
@@ -519,11 +519,24 @@ function getPriorityInfo(priority: string) {
 
 function getDeadlineDisplay(deadline: string | null) {
   if (!deadline) return null;
-  const diff = Math.ceil((new Date(deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-  if (diff < 0) return { text: `${Math.abs(diff)}d vencida`, color: 'text-red-600 font-semibold' };
-  if (diff === 0) return { text: 'Vence hoy', color: 'text-orange-600 font-semibold' };
-  if (diff <= 3) return { text: `${diff}d restantes`, color: 'text-orange-500' };
-  return { text: `${diff}d restantes`, color: 'text-green-600' };
+  
+  const [year, month, day] = deadline.split('-').map(Number);
+  const targetDate = new Date(year, month - 1, day);
+  targetDate.setHours(0, 0, 0, 0);
+
+  // Get current date in Peru context
+  const peruFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Lima', year: 'numeric', month: 'numeric', day: 'numeric' });
+  const [{ value: m },, { value: d },, { value: y }] = peruFormatter.formatToParts(new Date());
+  const todayPeru = new Date(Number(y), Number(m) - 1, Number(d));
+  todayPeru.setHours(0, 0, 0, 0);
+
+  const diffMs = targetDate.getTime() - todayPeru.getTime();
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0) return { text: `${Math.abs(diffDays)}d vencida`, color: 'text-red-600 font-semibold' };
+  if (diffDays === 0) return { text: 'Vence hoy', color: 'text-orange-600 font-semibold' };
+  if (diffDays <= 3) return { text: `${diffDays}d restantes`, color: 'text-orange-500' };
+  return { text: `${diffDays}d restantes`, color: 'text-green-600' };
 }
 
 function isLoopableVideo(url: string | null) {
@@ -575,7 +588,13 @@ function AssignTasksPage({ session, onViewTask, refreshKey }: { session: AuthSes
 
       {showCreate && (
         <CreateTaskModal 
-          users={users.filter(u => u.role === 'executor').filter(u => session.role !== 'executor' || (session.assignableUserIds && session.assignableUserIds.includes(u.id)))} 
+          users={
+            // Combine users and current user to ensure self-assignment is always possible
+            Array.from(new Map([
+              ...users.filter(u => u.role === 'executor' || u.role === 'assigner').filter(u => session.role !== 'executor' || (session.assignableUserIds && session.assignableUserIds.includes(u.id))).map(u => [u.id, u]),
+              [session.userId, users.find(u => u.id === session.userId)!]
+            ].filter(pair => pair[1])).values()) as User[]
+          } 
           onClose={() => setShowCreate(false)} 
           onCreated={() => { setShowCreate(false); setTasks([]); fetch('/api/tasks').then(r => r.json()).then(d => setTasks(d.tasks || [])); }} 
         />
@@ -635,7 +654,7 @@ function AssignTasksPage({ session, onViewTask, refreshKey }: { session: AuthSes
                     <span>👤 {task.assigned_user?.full_name || task.assigned_user?.username || task.assigned_user_id}</span>
                     {task.created_by_user?.full_name && <span>📝 {task.created_by_user.full_name}</span>}
                     {(task.categories?.length ?? 0) > 0 && <span>🏷️ {task.categories!.map(c => c.name).join(', ')}</span>}
-                    {task.deadline && <span className={getDeadlineDisplay(task.deadline)?.color}>📅 {new Date(task.deadline).toLocaleDateString('es')}</span>}
+                    {task.deadline && <span className={getDeadlineDisplay(task.deadline)?.color}>📅 {new Date(task.deadline).toLocaleDateString('es-PE', { timeZone: 'America/Lima' })}</span>}
                   </div>
                 </div>
                 <button onClick={() => onViewTask(task.id)} className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">Ver →</button>
@@ -765,6 +784,8 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
   const [users, setUsers] = useState<User[]>([]);
   const [showReassign, setShowReassign] = useState(false);
   const [reassignTo, setReassignTo] = useState('');
+
+  const [showEdit, setShowEdit] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -911,7 +932,7 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
             <div className="flex flex-wrap items-center gap-4 mt-4 text-sm text-gray-500">
               <span>👤 Asignado a: <strong className="text-gray-700">{task.assigned_user?.full_name || 'N/A'}</strong></span>
               <span>📝 Creado por: <strong className="text-gray-700">{task.created_by_user?.full_name || 'N/A'}</strong></span>
-              <span>📅 {new Date(task.created_at).toLocaleDateString('es')}</span>
+              <span>📅 {new Date(task.created_at).toLocaleDateString('es-PE', { timeZone: 'America/Lima' })}</span>
               {task.deadline && <span className={getDeadlineDisplay(task.deadline)?.color}>⏰ {getDeadlineDisplay(task.deadline)?.text}</span>}
               <span>⏱️ {totalHours.toFixed(1)}h totales</span>
             </div>
@@ -930,6 +951,7 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
                 </>
               )}
               <button onClick={() => setShowReassign(true)} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200 transition-colors">🔄 Reasignar</button>
+              <button onClick={() => setShowEdit(true)} className="px-4 py-2 bg-blue-50 text-blue-700 text-sm rounded-lg hover:bg-blue-100 transition-colors border border-blue-200">✏️ Editar Detalle</button>
             </div>
           )}
         </div>
@@ -956,6 +978,14 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
             </div>
           </div>
         </div>
+      {/* Edit Modal */}
+      {showEdit && (
+        <EditTaskModal 
+          task={task} 
+          categories={task.categories || []} 
+          onClose={() => setShowEdit(false)} 
+          onUpdated={() => { setShowEdit(false); refresh(); fetch(`/api/tasks/${taskId}`).then(r => r.json()).then(d => setTask(d.task)); }} 
+        />
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1031,7 +1061,7 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-semibold text-sm text-gray-800">{update.user?.full_name || 'Sistema'}</span>
                           {update.is_system && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Sistema</span>}
-                          <span className="text-xs text-gray-400">{new Date(update.timestamp).toLocaleString('es')}</span>
+                          <span className="text-xs text-gray-400">{new Date(update.timestamp).toLocaleString('es-PE', { timeZone: 'America/Lima' })}</span>
                         </div>
                         <p className="text-sm text-gray-600">{update.comment}</p>
                         {update.hours_spent > 0 && (
@@ -1294,7 +1324,7 @@ import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Cart
 
 // =================== ADMIN PAGE ===================
 function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => void }) {
-  const [tab, setTab] = useState<'users' | 'categories' | 'sidebar'>('users');
+  const [tab, setTab] = useState<'users' | 'categories' | 'sidebar'>(session.role === 'admin' ? 'users' : 'categories');
   const [users, setUsers] = useState<User[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [broadcast, setBroadcast] = useState<SidebarBroadcast | null>(null);
@@ -1352,15 +1382,19 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
 
       {/* Tabs */}
       <div className="flex gap-2 mb-6">
-        <button onClick={() => setTab('users')} className={`px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${tab === 'users' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200'}`}>
-          👥 Usuarios ({users.length})
-        </button>
+        {session.role === 'admin' && (
+          <button onClick={() => setTab('users')} className={`px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${tab === 'users' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200'}`}>
+            👥 Usuarios ({users.length})
+          </button>
+        )}
         <button onClick={() => setTab('categories')} className={`px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${tab === 'categories' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200'}`}>
           🏷️ Categorías ({categories.length})
         </button>
-        <button onClick={() => setTab('sidebar')} className={`px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${tab === 'sidebar' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200'}`}>
-          🎬 Sidebar Global
-        </button>
+        {session.role === 'admin' && (
+          <button onClick={() => setTab('sidebar')} className={`px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${tab === 'sidebar' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200'}`}>
+            🎬 Sidebar Global
+          </button>
+        )}
       </div>
 
       {tab === 'users' && (
@@ -1869,6 +1903,100 @@ function CreateCategoryModal({ categories, onClose, onCreated }: { categories: C
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl">Cancelar</button>
             <button type="submit" disabled={loading} className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl disabled:opacity-50">{loading ? 'Creando...' : 'Crear'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// =================== EDIT TASK MODAL ===================
+function EditTaskModal({ task, onClose, onUpdated }: { task: any; categories: Category[]; onClose: () => void; onUpdated: () => void }) {
+  const [title, setTitle] = useState(task.title);
+  const [description, setDescription] = useState(task.description || '');
+  const [priority, setPriority] = useState(task.priority);
+  const [deadline, setDeadline] = useState(task.deadline ? new Date(task.deadline).toISOString().split('T')[0] : '');
+  const [categoryIds, setCategoryIds] = useState<string[]>(task.categories?.map((c: any) => c.id) || []);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetch('/api/categories').then(r => r.json()).then(d => setCategories(d.categories || [])).catch(() => {});
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title) { setError('El título es requerido'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, description, priority, deadline: deadline || null, category_ids: categoryIds }),
+      });
+      const data = await res.json();
+      if (data.success) { onUpdated(); } else { setError(data.error || 'Error al actualizar'); }
+    } catch { setError('Error de conexión'); } finally { setLoading(false); }
+  };
+
+  const parentCategories = categories.filter(c => !c.parent_id);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+          <h2 className="text-xl font-bold text-gray-800">Editar Tarea</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {error && <div className="bg-red-50 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Título *</label>
+            <input value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" required />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" rows={3} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Prioridad</label>
+              <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+                <option value="urgent">🔴 Urgente</option>
+                <option value="high">🟡 Alta</option>
+                <option value="normal">🟢 Normal</option>
+                <option value="low">⚪ Baja</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Fecha Límite</label>
+              <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Categorías</label>
+            <div className="space-y-2 max-h-40 overflow-y-auto p-1">
+              {parentCategories.map(parent => (
+                <div key={parent.id}>
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={categoryIds.includes(parent.id)} onChange={e => setCategoryIds(e.target.checked ? [...categoryIds, parent.id] : categoryIds.filter(id => id !== parent.id))} className="rounded" />
+                    <span className="font-medium">{parent.name}</span>
+                  </label>
+                  {categories.filter(c => c.parent_id === parent.id).map(child => (
+                    <label key={child.id} className="flex items-center gap-2 text-sm text-gray-500 ml-6">
+                      <input type="checkbox" checked={categoryIds.includes(child.id)} onChange={e => setCategoryIds(e.target.checked ? [...categoryIds, child.id] : categoryIds.filter(id => id !== child.id))} className="rounded" />
+                      <span>{child.name}</span>
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-3 pt-4">
+            <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium">Cancelar</button>
+            <button type="submit" disabled={loading} className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium disabled:opacity-50">{loading ? 'Guardando...' : 'Guardar Cambios'}</button>
           </div>
         </form>
       </div>

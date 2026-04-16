@@ -60,9 +60,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
     }
 
+    const isCreator = task.created_by === session.userId;
+    const isAuthorizedRole = session.role === 'admin' || session.role === 'assigner';
     const delegatedManager = canManageDelegatedTask(session, task);
-    if (session.role === 'executor' && !delegatedManager) {
-      return NextResponse.json({ error: 'Sin permisos' }, { status: 403 });
+
+    if (!isAuthorizedRole && !isCreator && !delegatedManager) {
+      return NextResponse.json({ error: 'Sin permisos para editar esta tarea' }, { status: 403 });
     }
 
     // Handle reassignment
