@@ -2,11 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireRole } from '@/lib/auth';
 import { getTaskById, updateTask, reassignTask, deleteTask } from '@/lib/db';
 
-function canManageDelegatedTask(session: { role: string; userId: string; assignableUserIds?: string[] }, task: { created_by: string; assigned_user_id: string }) {
-  return session.role === 'executor' &&
-    task.created_by === session.userId &&
-    (session.assignableUserIds || []).includes(task.assigned_user_id);
-}
+
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -17,10 +13,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
     }
 
-    const delegatedManager = canManageDelegatedTask(session, task);
-
     // Check permissions: executor can only see their own tasks or delegated tasks they created.
-    if (session.role === 'executor' && task.assigned_user_id !== session.userId && !delegatedManager) {
+    if (session.role === 'executor' && task.assigned_user_id !== session.userId && task.created_by !== session.userId && !session.canViewAllTasks) {
       return NextResponse.json({ error: 'Sin permisos' }, { status: 403 });
     }
 
@@ -62,16 +56,19 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     const isCreator = task.created_by === session.userId;
     const isAuthorizedRole = session.role === 'admin' || session.role === 'assigner';
-    const delegatedManager = canManageDelegatedTask(session, task);
 
-    if (!isAuthorizedRole && !isCreator && !delegatedManager) {
+    if (!isAuthorizedRole && !isCreator) {
       return NextResponse.json({ error: 'Sin permisos para editar esta tarea' }, { status: 403 });
     }
 
     // Handle reassignment
     if (body.reassign_to && body.reassign_to !== task.assigned_user_id) {
-      if (session.role === 'executor' && !(session.assignableUserIds || []).includes(body.reassign_to)) {
-        return NextResponse.json({ error: 'No tienes permiso para reasignar a este usuario' }, { status: 403 });
+      if (session.role === 'executor') {
+        const isSelfAssignment = body.reassign_to === session.userId;
+        const isDelegated = session.assignableUserIds && session.assignableUserIds.includes(body.reassign_to);
+        if (!isSelfAssignment && !isDelegated) {
+          return NextResponse.json({ error: 'No tienes permiso para reasignar a este usuario' }, { status: 403 });
+        }
       }
       const updated = await reassignTask(id, body.reassign_to, session.userId);
       return NextResponse.json({ task: updated, success: true });

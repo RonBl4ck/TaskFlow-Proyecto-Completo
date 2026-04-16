@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
       const all = await getAllTasks();
       tasks = all.filter(t =>
         t.assigned_user_id === session.userId ||
-        (t.created_by === session.userId && (session.assignableUserIds || []).includes(t.assigned_user_id))
+        t.created_by === session.userId
       );
     }
 
@@ -62,10 +62,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (session.role === 'executor') {
-      if (!session.assignableUserIds || session.assignableUserIds.length === 0) {
-        return NextResponse.json({ error: 'Sin permisos para asignar tareas' }, { status: 403 });
-      }
-      if (!session.assignableUserIds.includes(assigned_user_id)) {
+      const isSelfAssignment = assigned_user_id === session.userId;
+      const isDelegated = session.assignableUserIds && session.assignableUserIds.includes(assigned_user_id);
+      
+      if (!isSelfAssignment && !isDelegated) {
         return NextResponse.json({ error: 'No tienes permiso para asignar a este usuario' }, { status: 403 });
       }
     } else if (session.role !== 'admin' && session.role !== 'assigner') {

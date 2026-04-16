@@ -2,11 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireRole } from '@/lib/auth';
 import { getTaskById, updateTask, createTaskUpdate } from '@/lib/db';
 
-function canManageDelegatedTask(session: { role: string; userId: string; assignableUserIds?: string[] }, task: { created_by: string; assigned_user_id: string }) {
-  return session.role === 'executor' &&
-    task.created_by === session.userId &&
-    (session.assignableUserIds || []).includes(task.assigned_user_id);
-}
+
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -20,13 +16,29 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
     }
 
-    const delegatedManager = canManageDelegatedTask(session, task);
+    const isCreator = task.created_by === session.userId;
 
     // Executor requests closure
     if (action === 'request_closure' && ((session.role === 'executor' && task.assigned_user_id === session.userId) || session.role === 'admin')) {
       if (task.status !== 'in_progress') {
         return NextResponse.json({ error: 'Solo se puede solicitar cierre de tareas en progreso' }, { status: 400 });
       }
+
+      if (isCreator && task.assigned_user_id === session.userId) {
+        const updated = await updateTask(id, { status: 'closed', closed_at: new Date().toISOString() });
+        await createTaskUpdate({
+          task_id: id,
+          user_id: session.userId,
+          comment: 'Cerró la tarea (autoasignación)',
+          hours_spent: 0,
+          time_type: null,
+          attachment_url: null,
+          attachment_expires_at: null,
+          is_system: true,
+        });
+        return NextResponse.json({ task: updated, success: true });
+      }
+
       const updated = await updateTask(id, { status: 'waiting_approval' });
       await createTaskUpdate({
         task_id: id,
@@ -42,7 +54,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     // Assigner/Admin approves closure
-    if (action === 'approve' && (session.role === 'assigner' || session.role === 'admin' || delegatedManager)) {
+    if (action === 'approve' && (session.role === 'assigner' || session.role === 'admin' || isCreator)) {
       if (task.status !== 'waiting_approval') {
         return NextResponse.json({ error: 'Solo se pueden aprobar tareas en espera de confirmación' }, { status: 400 });
       }
@@ -61,7 +73,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     // Assigner/Admin rejects closure
-    if (action === 'reject' && (session.role === 'assigner' || session.role === 'admin' || delegatedManager)) {
+    if (action === 'reject' && (session.role === 'assigner' || session.role === 'admin' || isCreator)) {
       if (task.status !== 'waiting_approval') {
         return NextResponse.json({ error: 'Solo se pueden rechazar tareas en espera de confirmación' }, { status: 400 });
       }
