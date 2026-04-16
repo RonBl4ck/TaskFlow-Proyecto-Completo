@@ -978,6 +978,8 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
             </div>
           </div>
         </div>
+      )}
+
       {/* Edit Modal */}
       {showEdit && (
         <EditTaskModal 
