@@ -75,8 +75,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
     }
 
-    // If executor comments on pending task, change to in_progress
-    if (session.role === 'executor' && task.assigned_user_id === session.userId) {
+    // If assigned user comments on pending task, change to in_progress
+    if (task.assigned_user_id === session.userId) {
       if (task && task.status === 'pending') {
         await updateTask(id, { status: 'in_progress' });
       }
