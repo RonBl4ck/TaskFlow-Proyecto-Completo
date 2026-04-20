@@ -18,8 +18,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const isCreator = task.created_by === session.userId;
 
-    // Executor requests closure
-    if (action === 'request_closure' && ((session.role === 'executor' && task.assigned_user_id === session.userId) || session.role === 'admin')) {
+    // Assigned user requests closure
+    if (action === 'request_closure' && (task.assigned_user_id === session.userId || session.role === 'admin')) {
       if (task.status !== 'in_progress') {
         return NextResponse.json({ error: 'Solo se puede solicitar cierre de tareas en progreso' }, { status: 400 });
       }

@@ -1051,7 +1051,7 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
                 {submitting ? 'Enviando...' : 'Enviar Actualización'}
               </button>
 
-              {session.role === 'executor' && (task.status === 'in_progress' || task.status === 'pending') && (
+              {task.assigned_user_id === session.userId && (task.status === 'in_progress' || task.status === 'pending') && (
                 <button onClick={() => handleStatusAction('request_closure')} className="w-full px-4 py-2.5 bg-orange-500 text-white rounded-xl hover:bg-orange-600 transition-colors font-medium">
                   📋 Solicitar Cierre
                 </button>
