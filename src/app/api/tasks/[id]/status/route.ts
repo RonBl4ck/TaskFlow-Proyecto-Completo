@@ -54,7 +54,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     // Assigner/Admin approves closure
-    if (action === 'approve' && (session.role === 'assigner' || session.role === 'admin' || isCreator)) {
+    if (action === 'approve' && (session.role === 'admin' || isCreator)) {
       if (task.status !== 'waiting_approval') {
         return NextResponse.json({ error: 'Solo se pueden aprobar tareas en espera de confirmación' }, { status: 400 });
       }
@@ -73,7 +73,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     // Assigner/Admin rejects closure
-    if (action === 'reject' && (session.role === 'assigner' || session.role === 'admin' || isCreator)) {
+    if (action === 'reject' && (session.role === 'admin' || isCreator)) {
       if (task.status !== 'waiting_approval') {
         return NextResponse.json({ error: 'Solo se pueden rechazar tareas en espera de confirmación' }, { status: 400 });
       }
@@ -82,6 +82,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         task_id: id,
         user_id: session.userId,
         comment: 'Rechazó el cierre de la tarea',
+        hours_spent: 0,
+        time_type: null,
+        attachment_url: null,
+        attachment_expires_at: null,
+        is_system: true,
+      });
+      return NextResponse.json({ task: updated, success: true });
+    }
+
+    // Admin/Creator reopens task
+    if (action === 'reopen' && (session.role === 'admin' || isCreator)) {
+      if (task.status !== 'closed') {
+        return NextResponse.json({ error: 'Solo se pueden reabrir tareas cerradas' }, { status: 400 });
+      }
+      const updated = await updateTask(id, { status: 'in_progress', closed_at: null });
+      await createTaskUpdate({
+        task_id: id,
+        user_id: session.userId,
+        comment: 'Reabrió la tarea',
         hours_spent: 0,
         time_type: null,
         attachment_url: null,

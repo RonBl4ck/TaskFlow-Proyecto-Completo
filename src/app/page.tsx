@@ -954,13 +954,16 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
               </div>
             )}
           </div>
-          {(session.role === 'admin' || session.role === 'assigner' || task.created_by === session.userId) && (
+          {(session.role === 'admin' || task.created_by === session.userId) && (
             <div className="flex flex-col gap-2">
               {task.status === 'waiting_approval' && (
                 <>
                   <button onClick={() => handleStatusAction('approve')} className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors">✅ Aprobar</button>
                   <button onClick={() => handleStatusAction('reject')} className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors">❌ Rechazar</button>
                 </>
+              )}
+              {task.status === 'closed' && (
+                <button onClick={() => handleStatusAction('reopen')} className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors">🔓 Reabrir Tarea</button>
               )}
               <button onClick={() => setShowReassign(true)} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200 transition-colors">🔄 Reasignar</button>
               <button onClick={() => setShowEdit(true)} className="px-4 py-2 bg-blue-50 text-blue-700 text-sm rounded-lg hover:bg-blue-100 transition-colors border border-blue-200">✏️ Editar Detalle</button>
