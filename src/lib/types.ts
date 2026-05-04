@@ -7,6 +7,7 @@ export interface User {
   full_name: string;
   role: UserRole;
   can_view_stats: boolean;
+  show_in_stats?: boolean;
   can_manage_categories: boolean;
   can_view_all_tasks: boolean;
   assignable_user_ids: string[];

@@ -1213,7 +1213,7 @@ function StatisticsPage({ session }: { session: AuthSession }) {
       fetch('/api/users').then(r => r.json()),
     ]).then(([statsData, usersData]) => {
       setStats(statsData);
-      setUsers(usersData.users?.filter((u: User) => u.role === 'executor' || u.role === 'assigner') || []);
+      setUsers(usersData.users?.filter((u: User) => u.show_in_stats !== false) || []);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -1449,6 +1449,11 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
     loadData();
   };
 
+  const handleToggleUserStatsVisibility = async (userId: string, value: boolean) => {
+    await fetch('/api/users', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: userId, show_in_stats: value }) });
+    loadData();
+  };
+
   const handleToggleUserCats = async (userId: string, value: boolean) => {
     await fetch('/api/users', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: userId, can_manage_categories: value }) });
     loadData();
@@ -1506,6 +1511,7 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Usuario</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Rol</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Ver Stats</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">En Gráficos</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Gest. Categorías</th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Acciones</th>
                 </tr>
@@ -1531,6 +1537,9 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
                     </td>
                     <td className="px-4 py-3 text-center">
                       <input type="checkbox" checked={user.can_view_stats} onChange={e => handleToggleUserStats(user.id, e.target.checked)} className="w-4 h-4 rounded text-blue-600" />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <input type="checkbox" checked={user.show_in_stats !== false} onChange={e => handleToggleUserStatsVisibility(user.id, e.target.checked)} className="w-4 h-4 rounded text-blue-600" />
                     </td>
                     <td className="px-4 py-3 text-center">
                       <input type="checkbox" checked={user.can_manage_categories} onChange={e => handleToggleUserCats(user.id, e.target.checked)} className="w-4 h-4 rounded text-blue-600" />
@@ -1725,6 +1734,7 @@ function CreateUserModal({ users, onClose, onCreated }: { users: User[]; onClose
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState('executor');
   const [canViewStats, setCanViewStats] = useState(false);
+  const [showInStats, setShowInStats] = useState(true);
   const [canManageCats, setCanManageCats] = useState(false);
   const [canViewAllTasks, setCanViewAllTasks] = useState(false);
   const [assignableUserIds, setAssignableUserIds] = useState<string[]>([]);
@@ -1748,6 +1758,7 @@ function CreateUserModal({ users, onClose, onCreated }: { users: User[]; onClose
           full_name: fullName,
           role,
           can_view_stats: canViewStats,
+          show_in_stats: showInStats,
           can_manage_categories: canManageCats,
           can_view_all_tasks: canViewAllTasks,
           assignable_user_ids: assignableUserIds,
@@ -1805,6 +1816,7 @@ function CreateUserModal({ users, onClose, onCreated }: { users: User[]; onClose
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canViewAllTasks} onChange={e => setCanViewAllTasks(e.target.checked)} className="rounded text-blue-600" /> <span className="font-medium text-blue-700">Supervisión Global (Ver todas)</span></label>
             </div>
           )}
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={showInStats} onChange={e => setShowInStats(e.target.checked)} className="rounded" /> Mostrar en gráficos de estadísticas</label>
           {role === 'executor' && (
             <div className="space-y-2 p-3 bg-gray-50 rounded-xl border border-gray-100">
               <p className="text-xs font-semibold text-gray-500 uppercase">Delegación (Líder de Equipo)</p>
@@ -1839,6 +1851,7 @@ function EditUserModal({ users, user, onClose, onUpdated }: { users: User[]; use
   const [role, setRole] = useState(user.role);
   const [password, setPassword] = useState('');
   const [canViewStats, setCanViewStats] = useState(user.can_view_stats || false);
+  const [showInStats, setShowInStats] = useState(user.show_in_stats !== false);
   const [canManageCats, setCanManageCats] = useState(user.can_manage_categories || false);
   const [canViewAllTasks, setCanViewAllTasks] = useState(user.can_view_all_tasks || false);
   const [assignableUserIds, setAssignableUserIds] = useState<string[]>(user.assignable_user_ids || []);
@@ -1858,6 +1871,7 @@ function EditUserModal({ users, user, onClose, onUpdated }: { users: User[]; use
         full_name: fullName,
         role,
         can_view_stats: canViewStats,
+        show_in_stats: showInStats,
         can_manage_categories: canManageCats,
         can_view_all_tasks: canViewAllTasks,
         assignable_user_ids: assignableUserIds,
@@ -1906,6 +1920,7 @@ function EditUserModal({ users, user, onClose, onUpdated }: { users: User[]; use
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canViewAllTasks} onChange={e => setCanViewAllTasks(e.target.checked)} className="rounded text-blue-600" /> <span className="font-medium text-blue-700">Supervisión Global (Ver todas)</span></label>
             </div>
           )}
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={showInStats} onChange={e => setShowInStats(e.target.checked)} className="rounded" /> Mostrar en gráficos de estadísticas</label>
           {role === 'executor' && (
             <div className="space-y-2 p-3 bg-gray-50 rounded-xl border border-gray-100">
               <p className="text-xs font-semibold text-gray-500 uppercase">Delegación (Líder de Equipo)</p>

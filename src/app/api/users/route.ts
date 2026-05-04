@@ -23,6 +23,7 @@ export async function POST(request: NextRequest) {
       full_name,
       role,
       can_view_stats,
+      show_in_stats,
       can_manage_categories,
       can_view_all_tasks,
       assignable_user_ids,
@@ -52,6 +53,7 @@ export async function POST(request: NextRequest) {
       full_name,
       role,
       can_view_stats: can_view_stats || false,
+      show_in_stats: show_in_stats !== false,
       can_manage_categories: can_manage_categories || false,
       can_view_all_tasks: can_view_all_tasks || false,
       assignable_user_ids: assignable_user_ids || [],
@@ -77,6 +79,7 @@ export async function PUT(request: NextRequest) {
       full_name,
       role,
       can_view_stats,
+      show_in_stats,
       can_manage_categories,
       password,
       can_view_all_tasks,
@@ -96,6 +99,7 @@ export async function PUT(request: NextRequest) {
     if (role) updates.role = role;
     if (can_manage_categories !== undefined) updates.can_manage_categories = can_manage_categories;
     if (can_view_stats !== undefined) updates.can_view_stats = can_view_stats;
+    if (show_in_stats !== undefined) updates.show_in_stats = show_in_stats;
     if (can_view_all_tasks !== undefined) updates.can_view_all_tasks = can_view_all_tasks;
     if (assignable_user_ids !== undefined) updates.assignable_user_ids = assignable_user_ids;
     if (sidebar_gif_idle !== undefined) updates.sidebar_gif_idle = sidebar_gif_idle || null;
