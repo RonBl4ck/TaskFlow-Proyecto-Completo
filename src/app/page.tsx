@@ -1213,7 +1213,7 @@ function StatisticsPage({ session }: { session: AuthSession }) {
       fetch('/api/users').then(r => r.json()),
     ]).then(([statsData, usersData]) => {
       setStats(statsData);
-      setUsers(usersData.users?.filter((u: User) => u.role === 'executor') || []);
+      setUsers(usersData.users?.filter((u: User) => u.role === 'executor' || u.role === 'assigner') || []);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
