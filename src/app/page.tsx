@@ -786,6 +786,7 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
   const [hours, setHours] = useState('');
+  const [progressPercentage, setProgressPercentage] = useState('');
   const [timeType, setTimeType] = useState<'office' | 'outside'>('office');
   const [attachmentUrl, setAttachmentUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -793,6 +794,7 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
   const [timerSeconds, setTimerSeconds] = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerTaskId, setTimerTaskId] = useState<string | null>(null);
+  const [timerStartedAt, setTimerStartedAt] = useState<number | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [showReassign, setShowReassign] = useState(false);
   const [reassignTo, setReassignTo] = useState('');
@@ -812,49 +814,96 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
   // Timer
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (timerRunning) {
-      interval = setInterval(() => setTimerSeconds(s => s + 1), 1000);
+    if (timerRunning && timerStartedAt) {
+      const syncTimer = () => setTimerSeconds(Math.max(0, Math.floor((Date.now() - timerStartedAt) / 1000)));
+      syncTimer();
+      interval = setInterval(syncTimer, 1000);
     }
     return () => clearInterval(interval);
-  }, [timerRunning]);
+  }, [timerRunning, timerStartedAt]);
 
   useEffect(() => {
     const saved = localStorage.getItem('timer');
     if (saved) {
-      const data = JSON.parse(saved);
-      if (data.taskId === taskId) {
-        setTimerSeconds(Math.floor((Date.now() - data.startedAt) / 1000));
-        setTimerRunning(true);
-        setTimerTaskId(taskId);
+      try {
+        const data = JSON.parse(saved);
+        if (data.taskId === taskId && typeof data.startedAt === 'number') {
+          setTimerStartedAt(data.startedAt);
+          setTimerSeconds(Math.max(0, Math.floor((Date.now() - data.startedAt) / 1000)));
+          setTimerRunning(true);
+          setTimerTaskId(taskId);
+        }
+      } catch {
+        localStorage.removeItem('timer');
       }
     }
   }, [taskId]);
 
   const startTimer = () => {
+    const startedAt = Date.now();
     setTimerSeconds(0);
     setTimerRunning(true);
     setTimerTaskId(taskId);
-    localStorage.setItem('timer', JSON.stringify({ taskId, startedAt: Date.now() }));
+    setTimerStartedAt(startedAt);
+    localStorage.setItem('timer', JSON.stringify({ taskId, startedAt }));
   };
 
   const stopTimer = () => {
+    const startedAt = timerStartedAt;
+    const elapsedSeconds = startedAt ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) : timerSeconds;
     setTimerRunning(false);
-    const hrs = timerSeconds / 3600;
-    setHours(hrs.toFixed(2));
+    setTimerStartedAt(null);
+    setTimerSeconds(elapsedSeconds);
+    setHours(formatSecondsAsHoursMinutes(elapsedSeconds));
     localStorage.removeItem('timer');
+  };
+
+  const parseHoursMinutesInput = (value: string) => {
+    const trimmed = value.trim().replace(',', '.');
+    if (!trimmed) return 0;
+    const parts = trimmed.split('.');
+    if (parts.length > 2) return NaN;
+    const [hourPart, minutePart = ''] = parts;
+    const parsedHours = Number(hourPart || '0');
+    const parsedMinutes = minutePart ? Number(minutePart) : 0;
+
+    if (!Number.isFinite(parsedHours) || !Number.isFinite(parsedMinutes) || parsedHours < 0 || parsedMinutes < 0 || parsedMinutes >= 60 || minutePart.length > 2) {
+      return NaN;
+    }
+
+    return parsedHours + parsedMinutes / 60;
+  };
+
+  const formatSecondsAsHoursMinutes = (seconds: number) => {
+    const totalMinutes = Math.round(seconds / 60);
+    const hrs = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    return `${hrs}.${String(mins).padStart(2, '0')}`;
   };
 
   const submitUpdate = async () => {
     setSubmitting(true);
     setError('');
     try {
+      const parsedHours = parseHoursMinutesInput(hours);
+      if (Number.isNaN(parsedHours)) {
+        setError('Usa formato horas.minutos. Ejemplo: 0.30 para 30 minutos, 1.15 para 1h 15m.');
+        return;
+      }
+      const trimmedProgress = progressPercentage.trim();
+      const parsedProgress = trimmedProgress ? Number(trimmedProgress) : null;
+      if (parsedProgress !== null && (!Number.isFinite(parsedProgress) || parsedProgress < 0 || parsedProgress > 100)) {
+        setError('El porcentaje de avance debe estar entre 0 y 100.');
+        return;
+      }
       const res = await fetch(`/api/tasks/${taskId}/updates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           comment,
-          hours_spent: parseFloat(hours) || 0,
-          time_type: parseFloat(hours) > 0 ? timeType : null,
+          hours_spent: parsedHours,
+          progress_percentage: parsedProgress,
+          time_type: parsedHours > 0 ? timeType : null,
           attachment_url: attachmentUrl || null,
         }),
       });
@@ -862,6 +911,7 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
       if (data.success) {
         setComment('');
         setHours('');
+        setProgressPercentage('');
         setAttachmentUrl('');
         refresh();
         fetch(`/api/tasks/${taskId}`).then(r => r.json()).then(d => setTask(d.task));
@@ -922,7 +972,14 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
   if (!task) return <div className="text-center py-20 text-gray-500">Tarea no encontrada</div>;
 
   const totalHours = task.updates?.filter((u: any) => !u.is_system).reduce((sum: number, u: any) => sum + (u.hours_spent || 0), 0) || 0;
+  const latestProgress = task.updates?.find((u: any) => !u.is_system && u.progress_percentage !== null && u.progress_percentage !== undefined)?.progress_percentage;
   const formatTime = (s: number) => `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const formatDecimalHoursAsHoursMinutes = (decimalHours: number) => {
+    const totalMinutes = Math.round((Number(decimalHours) || 0) * 60);
+    const hrs = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
+  };
 
   return (
     <div>
@@ -946,8 +1003,14 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
               <span>📝 Creado por: <strong className="text-gray-700">{task.created_by_user?.full_name || 'N/A'}</strong></span>
               <span>📅 {new Date(task.created_at).toLocaleDateString('es-PE', { timeZone: 'America/Lima' })}</span>
               {task.deadline && <span className={getDeadlineDisplay(task.deadline)?.color}>⏰ {getDeadlineDisplay(task.deadline)?.text}</span>}
-              <span>⏱️ {totalHours.toFixed(1)}h totales</span>
+              <span>⏱️ {formatDecimalHoursAsHoursMinutes(totalHours)} totales</span>
+              {latestProgress !== undefined && <span>Avance: <strong className="text-gray-700">{latestProgress}%</strong></span>}
             </div>
+            {latestProgress !== undefined && (
+              <div className="mt-3 h-2 w-full max-w-md rounded-full bg-gray-100 overflow-hidden">
+                <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${latestProgress}%` }} />
+              </div>
+            )}
             {task.categories?.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-3">
                 {task.categories.map((c: Category) => <span key={c.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">🏷️ {c.name}</span>)}
@@ -1032,8 +1095,8 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Horas</label>
-                  <input type="number" step="0.25" value={hours} onChange={e => setHours(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" placeholder="0" />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Horas.minutos</label>
+                  <input type="text" inputMode="decimal" value={hours} onChange={e => setHours(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" placeholder="0.30" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
@@ -1044,13 +1107,17 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
                 </div>
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Porcentaje de avance</label>
+                <input type="number" min="0" max="100" step="1" value={progressPercentage} onChange={e => setProgressPercentage(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" placeholder="0 - 100" />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Link (WeTransfer, Drive, etc.)</label>
                 <input type="url" value={attachmentUrl} onChange={e => setAttachmentUrl(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" placeholder="https://..." />
               </div>
 
               {error && <div className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-sm">{error}</div>}
 
-              <button onClick={submitUpdate} disabled={submitting || (!comment && !hours && !attachmentUrl)} className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium disabled:opacity-50">
+              <button onClick={submitUpdate} disabled={submitting || (!comment && !hours && !attachmentUrl && !progressPercentage)} className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium disabled:opacity-50">
                 {submitting ? 'Enviando...' : 'Enviar Actualización'}
               </button>
 
@@ -1081,9 +1148,20 @@ function TaskDetailPage({ taskId, session, onBack, refresh }: { taskId: string; 
                           <span className="text-xs text-gray-400">{new Date(update.timestamp).toLocaleString('es-PE', { timeZone: 'America/Lima' })}</span>
                         </div>
                         <p className="text-sm text-gray-600">{update.comment}</p>
+                        {update.progress_percentage !== null && update.progress_percentage !== undefined && (
+                          <div className="mt-2">
+                            <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                              <span>Avance de la tarea</span>
+                              <span className="font-semibold text-gray-700">{update.progress_percentage}%</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-white overflow-hidden border border-gray-200">
+                              <div className="h-full rounded-full bg-green-500" style={{ width: `${update.progress_percentage}%` }} />
+                            </div>
+                          </div>
+                        )}
                         {update.hours_spent > 0 && (
                           <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
-                            <span>⏱️ {update.hours_spent}h</span>
+                            <span>⏱️ {formatDecimalHoursAsHoursMinutes(update.hours_spent)}</span>
                             <span>{update.time_type === 'office' ? '🏢 Oficina' : '🏠 Fuera'}</span>
                           </div>
                         )}

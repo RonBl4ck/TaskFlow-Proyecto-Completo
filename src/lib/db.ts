@@ -287,7 +287,7 @@ export async function getCategoryStats(): Promise<any[]> {
 }
 
 export async function getUserStatsAll(): Promise<any[]> {
-  const users = await getExecutors();
+  const users = await getAllUsers();
   const { data: tasks } = await supabase.from('tasks').select('id, assigned_user_id, status');
   const { data: updates } = await supabase.from('task_updates').select('user_id, hours_spent, time_type').eq('deleted', false).eq('is_system', false);
 

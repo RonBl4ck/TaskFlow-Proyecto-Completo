@@ -38,7 +38,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const session = await requireRole('admin', 'assigner', 'executor');
     const { id } = await params;
     const body = await request.json();
-    const { comment, hours_spent, time_type, attachment_url } = body;
+    const { comment, hours_spent, time_type, attachment_url, progress_percentage } = body;
     const { getTaskById, updateTask } = await import('@/lib/db');
     const task = await getTaskById(id);
 
@@ -51,8 +51,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'Sin permisos' }, { status: 403 });
     }
 
-    if (!comment && hours_spent === 0 && !attachment_url) {
-      return NextResponse.json({ error: 'Debes agregar un comentario, horas o un link' }, { status: 400 });
+    const parsedHours = Number(hours_spent) || 0;
+    const parsedProgress = progress_percentage === null || progress_percentage === undefined || progress_percentage === ''
+      ? null
+      : Number(progress_percentage);
+
+    if (parsedProgress !== null && (!Number.isFinite(parsedProgress) || parsedProgress < 0 || parsedProgress > 100)) {
+      return NextResponse.json({ error: 'El porcentaje de avance debe estar entre 0 y 100' }, { status: 400 });
+    }
+
+    if (!comment && parsedHours === 0 && !attachment_url && parsedProgress === null) {
+      return NextResponse.json({ error: 'Debes agregar un comentario, horas, porcentaje o un link' }, { status: 400 });
     }
 
     const attachment_expires_at = attachment_url ? new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString() : null;
@@ -61,7 +70,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       task_id: id,
       user_id: session.userId,
       comment: comment || '',
-      hours_spent: hours_spent || 0,
+      hours_spent: parsedHours,
+      progress_percentage: parsedProgress,
       time_type: time_type || null,
       attachment_url: attachment_url || null,
       attachment_expires_at,

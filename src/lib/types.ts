@@ -42,6 +42,7 @@ export interface TaskUpdate {
   user_id: string;
   comment: string;
   hours_spent: number;
+  progress_percentage?: number | null;
   time_type: TimeType | null;
   timestamp: string;
   attachment_url: string | null;
