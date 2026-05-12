@@ -1201,46 +1201,194 @@ function WeTransferWarning({ expiresAt }: { expiresAt: string }) {
 }
 
 // =================== STATISTICS PAGE ===================
+function formatDateInput(date: Date) {
+  return date.toISOString().split('T')[0];
+}
+
+function getMonthRange(offset = 0) {
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+  return { start: formatDateInput(first), end: formatDateInput(last) };
+}
+
+function getDateRangeForPreset(preset: 'all' | 'today' | 'week' | 'month' | 'previous_month' | 'custom') {
+  const today = new Date();
+  if (preset === 'all') return { start: '', end: '' };
+  if (preset === 'today') return { start: formatDateInput(today), end: formatDateInput(today) };
+  if (preset === 'previous_month') return getMonthRange(-1);
+  if (preset === 'month') return getMonthRange();
+  if (preset === 'week') {
+    const start = new Date(today);
+    start.setDate(today.getDate() - today.getDay());
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return { start: formatDateInput(start), end: formatDateInput(end) };
+  }
+  return { start: '', end: '' };
+}
+
 function StatisticsPage({ session }: { session: AuthSession }) {
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [users, setUsers] = useState<User[]>([]);
+  const [dateMode, setDateMode] = useState<'hours_logged' | 'task_created'>('hours_logged');
+  const [datePreset, setDatePreset] = useState<'all' | 'today' | 'week' | 'month' | 'previous_month' | 'custom'>('month');
+  const [startDate, setStartDate] = useState(() => getMonthRange().start);
+  const [endDate, setEndDate] = useState(() => getMonthRange().end);
+  const [timeType, setTimeType] = useState<'office' | 'outside' | ''>('');
+  const [selectedParentCategoryId, setSelectedParentCategoryId] = useState('');
+  const [selectedChildName, setSelectedChildName] = useState('');
+  const [categoryView, setCategoryView] = useState<'parents' | 'children' | 'globalChildren'>('parents');
+
+  const statsQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('dateMode', dateMode);
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    if (timeType) params.set('timeType', timeType);
+    if (selectedUserId) params.set('userId', selectedUserId);
+    if (selectedParentCategoryId) params.set('parentCategoryId', selectedParentCategoryId);
+    if (selectedChildName) params.set('childCategoryName', selectedChildName);
+    return params.toString();
+  }, [dateMode, startDate, endDate, timeType, selectedUserId, selectedParentCategoryId, selectedChildName]);
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/stats').then(r => r.json()),
-      fetch('/api/users').then(r => r.json()),
-    ]).then(([statsData, usersData]) => {
-      setStats(statsData);
-      setUsers(usersData.users?.filter((u: User) => u.show_in_stats !== false) || []);
-    }).catch(() => {}).finally(() => setLoading(false));
+    fetch('/api/users')
+      .then(r => r.json())
+      .then(usersData => setUsers(usersData.users?.filter((u: User) => u.show_in_stats !== false) || []))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (selectedUserId) {
-      fetch(`/api/stats?userId=${selectedUserId}`).then(r => r.json()).then(d => setStats((prev: any) => prev ? { ...prev, individualStats: d.individualStats } : null)).catch(() => {});
-    } else {
-      setStats((prev: any) => prev ? { ...prev, individualStats: null } : null);
-    }
-  }, [selectedUserId]);
+    setLoading(true);
+    fetch(`/api/stats?${statsQuery}`)
+      .then(r => r.json())
+      .then(statsData => setStats(statsData))
+      .catch(() => setStats(null))
+      .finally(() => setLoading(false));
+  }, [statsQuery]);
 
-  if (loading) return <div className="flex items-center justify-center py-20"><div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>;
+  if (loading && !stats) return <div className="flex items-center justify-center py-20"><div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>;
   if (!stats) return <div className="text-center py-20 text-gray-500">No se pudieron cargar las estadísticas</div>;
 
   const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4'];
+  const selectedParent = stats?.categoryStats?.find((cat: any) => cat.category_id === selectedParentCategoryId);
+  const mainCategoryData =
+    categoryView === 'globalChildren'
+      ? stats?.childCategoryGlobalStats || []
+      : categoryView === 'children' || selectedParentCategoryId
+        ? stats?.childCategoryStats || []
+        : stats?.categoryStats || [];
+  const mainCategoryTitle =
+    categoryView === 'globalChildren'
+      ? 'Horas por AP / MT / BT agrupado'
+      : selectedParent
+        ? `Detalle de ${selectedParent.category_label}`
+        : 'Horas por CategorÃ­a Principal';
+  const officeOutsideData = [
+    { name: 'Oficina', type: 'office', value: stats?.overview?.officeHours || 0 },
+    { name: 'Fuera', type: 'outside', value: stats?.overview?.outsideHours || 0 },
+  ];
+
+  const applyDatePreset = (preset: typeof datePreset) => {
+    setDatePreset(preset);
+    const range = getDateRangeForPreset(preset);
+    setStartDate(range.start);
+    setEndDate(range.end);
+  };
+
+  const handleCategoryBarClick = (payload: any) => {
+    const item = payload?.payload;
+    if (!item) return;
+    if (categoryView === 'globalChildren') {
+      setSelectedChildName(selectedChildName === item.category_name ? '' : item.category_name);
+      return;
+    }
+    if (!item.parent_category_id) {
+      setSelectedParentCategoryId(selectedParentCategoryId === item.category_id ? '' : item.category_id);
+      setCategoryView('children');
+    } else {
+      setSelectedChildName(selectedChildName === item.category_name ? '' : item.category_name);
+    }
+  };
+
+  const clearInteractiveFilters = () => {
+    setTimeType('');
+    setSelectedParentCategoryId('');
+    setSelectedChildName('');
+    setCategoryView('parents');
+  };
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Estadísticas</h1>
-          <p className="text-gray-500 mt-1">Resumen general y por usuario</p>
+          <p className="text-gray-500 mt-1">Explora horas, categorías y tareas con filtros compartidos</p>
         </div>
         <select value={selectedUserId} onChange={e => setSelectedUserId(e.target.value)} className="px-4 py-2 border border-gray-300 rounded-xl bg-white">
-          <option value="">Vista General</option>
+          <option value="">Todos los usuarios</option>
           {users.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
         </select>
+        <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <label className="text-sm text-gray-600">
+              <span className="block mb-1 font-medium">Periodo</span>
+              <select value={datePreset} onChange={e => applyDatePreset(e.target.value as typeof datePreset)} className="w-full px-3 py-2 border border-gray-300 rounded-xl bg-white">
+                <option value="all">Todo</option>
+                <option value="today">Hoy</option>
+                <option value="week">Esta semana</option>
+                <option value="month">Este mes</option>
+                <option value="previous_month">Mes anterior</option>
+                <option value="custom">Personalizado</option>
+              </select>
+            </label>
+            <label className="text-sm text-gray-600">
+              <span className="block mb-1 font-medium">Desde</span>
+              <input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setDatePreset('custom'); }} className="w-full px-3 py-2 border border-gray-300 rounded-xl" />
+            </label>
+            <label className="text-sm text-gray-600">
+              <span className="block mb-1 font-medium">Hasta</span>
+              <input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setDatePreset('custom'); }} className="w-full px-3 py-2 border border-gray-300 rounded-xl" />
+            </label>
+            <label className="text-sm text-gray-600">
+              <span className="block mb-1 font-medium">Fecha base</span>
+              <select value={dateMode} onChange={e => setDateMode(e.target.value as 'hours_logged' | 'task_created')} className="w-full px-3 py-2 border border-gray-300 rounded-xl bg-white">
+                <option value="hours_logged">Registro de horas</option>
+                <option value="task_created">Inicio de tarea</option>
+              </select>
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { key: 'parents', label: 'CategorÃ­as principales' },
+              { key: 'children', label: selectedParent ? `AP/MT/BT de ${selectedParent.category_label}` : 'AP/MT/BT por categorÃ­a' },
+              { key: 'globalChildren', label: 'AP/MT/BT agrupado' },
+            ].map(item => (
+              <button
+                key={item.key}
+                onClick={() => setCategoryView(item.key as typeof categoryView)}
+                className={`px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${categoryView === item.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+              >
+                {item.label}
+              </button>
+            ))}
+            {(timeType || selectedParentCategoryId || selectedChildName || categoryView !== 'parents') && (
+              <button onClick={clearInteractiveFilters} className="px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">
+                Limpiar selecciÃ³n
+              </button>
+            )}
+          </div>
+          {(timeType || selectedParent || selectedChildName) && (
+            <div className="flex flex-wrap gap-2 text-xs">
+              {timeType && <span className="px-2 py-1 rounded-full bg-amber-50 text-amber-700">Tiempo: {timeType === 'office' ? 'Oficina' : 'Fuera'}</span>}
+              {selectedParent && <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700">CategorÃ­a: {selectedParent.category_label}</span>}
+              {selectedChildName && <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">SubcategorÃ­a: {selectedChildName}</span>}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Overview Cards */}
@@ -1259,19 +1407,19 @@ function StatisticsPage({ session }: { session: AuthSession }) {
         ))}
       </div>
 
-      {!selectedUserId ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Hours by Category */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h3 className="font-bold text-gray-800 mb-4">Horas por Categoría</h3>
-            {stats.categoryStats.length > 0 ? (
+            <h3 className="font-bold text-gray-800 mb-1">{mainCategoryTitle}</h3>
+            <p className="text-xs text-gray-500 mb-4">Haz clic en una barra para filtrar o entrar al detalle.</p>
+            {mainCategoryData.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={stats.categoryStats}>
+                <BarChart data={mainCategoryData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="category_label" tick={{ fontSize: 11 }} angle={-20} textAnchor="end" height={70} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip />
-                  <Bar dataKey="hours_spent" fill="#3B82F6" radius={[4, 4, 0, 0]} name="Horas" />
+                  <Bar dataKey="hours_spent" fill="#3B82F6" radius={[4, 4, 0, 0]} name="Horas" onClick={handleCategoryBarClick} cursor="pointer" />
                 </BarChart>
               </ResponsiveContainer>
             ) : <p className="text-gray-400 text-center py-8">Sin datos</p>}
@@ -1295,16 +1443,14 @@ function StatisticsPage({ session }: { session: AuthSession }) {
 
           {/* Office vs Outside */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h3 className="font-bold text-gray-800 mb-4">Oficina vs Fuera de Oficina</h3>
+            <h3 className="font-bold text-gray-800 mb-1">Oficina vs Fuera de Oficina</h3>
+            <p className="text-xs text-gray-500 mb-4">Haz clic en un segmento para filtrar todo el tablero.</p>
             {(stats.overview.officeHours > 0 || stats.overview.outsideHours > 0) ? (
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
-                  <Pie data={[
-                    { name: 'Oficina', value: stats.overview.officeHours },
-                    { name: 'Fuera', value: stats.overview.outsideHours },
-                  ]} cx="50%" cy="50%" outerRadius={100} fill="#8884d8" dataKey="value" label={({ name, value }) => `${name}: ${value}h`}>
-                    <Cell fill="#3B82F6" />
-                    <Cell fill="#F59E0B" />
+                  <Pie data={officeOutsideData} cx="50%" cy="50%" outerRadius={100} fill="#8884d8" dataKey="value" label={({ name, value }) => `${name}: ${value}h`} onClick={(data: any) => setTimeType(timeType === data.type ? '' : data.type)} cursor="pointer">
+                    <Cell fill={timeType && timeType !== 'office' ? '#BFDBFE' : '#3B82F6'} />
+                    <Cell fill={timeType && timeType !== 'outside' ? '#FDE68A' : '#F59E0B'} />
                   </Pie>
                   <Tooltip />
                 </PieChart>
@@ -1314,10 +1460,10 @@ function StatisticsPage({ session }: { session: AuthSession }) {
 
           {/* Tasks closed by category */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h3 className="font-bold text-gray-800 mb-4">Tareas Cerradas por Categoría</h3>
-            {stats.categoryStats.filter((c: any) => c.tasks_closed > 0).length > 0 ? (
+            <h3 className="font-bold text-gray-800 mb-4">Tareas Cerradas</h3>
+            {mainCategoryData.filter((c: any) => c.tasks_closed > 0).length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={stats.categoryStats.filter((c: any) => c.tasks_closed > 0)}>
+                <BarChart data={mainCategoryData.filter((c: any) => c.tasks_closed > 0)}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="category_label" tick={{ fontSize: 11 }} angle={-20} textAnchor="end" height={70} />
                   <YAxis tick={{ fontSize: 12 }} />
@@ -1327,9 +1473,9 @@ function StatisticsPage({ session }: { session: AuthSession }) {
               </ResponsiveContainer>
             ) : <p className="text-gray-400 text-center py-8">Sin datos</p>}
           </div>
-        </div>
-      ) : stats.individualStats ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      </div>
+      {selectedUserId && stats.individualStats && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
           {/* Daily Hours */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
             <h3 className="font-bold text-gray-800 mb-4">Horas por Día</h3>
@@ -1404,7 +1550,28 @@ function StatisticsPage({ session }: { session: AuthSession }) {
             })()}
           </div>
         </div>
-      ) : (
+      )}
+      <div className="bg-white rounded-2xl border border-gray-200 p-6 mt-6">
+        <h3 className="font-bold text-gray-800 mb-1">Tareas en la selecciÃ³n</h3>
+        <p className="text-xs text-gray-500 mb-4">Lista compacta segÃºn periodo, usuario, categorÃ­a y tipo de tiempo.</p>
+        {stats.taskDetails?.length > 0 ? (
+          <div className="space-y-2">
+            {stats.taskDetails.slice(0, 20).map((task: any) => (
+              <div key={task.task_id} className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-2 rounded-xl border border-gray-100 px-4 py-3 text-sm">
+                <div>
+                  <p className="font-medium text-gray-800">{task.title}</p>
+                  <p className="text-xs text-gray-500">{task.assigned_user} · {task.category_labels?.slice(0, 2).join(', ') || 'Sin categorÃ­a'}</p>
+                </div>
+                <span className="text-right font-semibold text-gray-800">{task.hours_spent}h</span>
+                <span className="text-right text-blue-700">Oficina {task.office_hours}h</span>
+                <span className="text-right text-amber-700">Fuera {task.outside_hours}h</span>
+              </div>
+            ))}
+            {stats.taskDetails.length > 20 && <p className="text-xs text-gray-400 mt-3">Mostrando 20 de {stats.taskDetails.length} tareas.</p>}
+          </div>
+        ) : <p className="text-gray-400 text-center py-8">No hay tareas para la selecciÃ³n actual</p>}
+      </div>
+      {false && (
         <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center">
           <span className="text-5xl mb-4 block">📊</span>
           <p className="text-gray-500">Selecciona un usuario para ver sus estadísticas</p>

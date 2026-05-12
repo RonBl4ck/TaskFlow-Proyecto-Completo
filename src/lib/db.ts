@@ -1,4 +1,4 @@
-import { User, Task, TaskUpdate, Category, TaskCategory, SidebarBroadcast } from './types';
+import { User, Task, TaskUpdate, Category, TaskCategory, SidebarBroadcast, TimeType } from './types';
 import { supabase } from './supabase';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
@@ -257,119 +257,297 @@ export async function getTaskCategories(taskId: string): Promise<Category[]> {
 
 // ============ STATISTICS ============
 
-export async function getStatsOverview(): Promise<any> {
-  const { data: updates } = await supabase.from('task_updates').select('hours_spent, time_type, timestamp').eq('deleted', false).eq('is_system', false);
-  const { data: tasks } = await supabase.from('tasks').select('status');
-  
-  const totalHours = updates?.reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0) || 0;
-  const officeHours = updates?.filter(u => u.time_type === 'office').reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0) || 0;
-  const outsideHours = updates?.filter(u => u.time_type === 'outside').reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0) || 0;
+export type StatsDateMode = 'hours_logged' | 'task_created';
 
-  return {
-    totalTasks: tasks?.length || 0,
-    pendingTasks: tasks?.filter(t => t.status === 'pending').length || 0,
-    inProgressTasks: tasks?.filter(t => t.status === 'in_progress').length || 0,
-    waitingApprovalTasks: tasks?.filter(t => t.status === 'waiting_approval').length || 0,
-    closedTasks: tasks?.filter(t => t.status === 'closed').length || 0,
-    rejectedTasks: tasks?.filter(t => t.status === 'rejected').length || 0,
-    totalHours: Math.round(totalHours * 100) / 100,
-    officeHours: Math.round(officeHours * 100) / 100,
-    outsideHours: Math.round(outsideHours * 100) / 100,
-  };
+export interface StatsFilters {
+  startDate?: string | null;
+  endDate?: string | null;
+  dateMode?: StatsDateMode;
+  timeType?: TimeType | null;
+  parentCategoryId?: string | null;
+  childCategoryName?: string | null;
+  userId?: string | null;
 }
 
-export async function getCategoryStats(): Promise<any[]> {
-  const cats = await getAllCategories();
-  const { data: tcs } = await supabase.from('task_categories').select('task_id, category_id');
-  const { data: updates } = await supabase.from('task_updates').select('task_id, hours_spent').eq('deleted', false).eq('is_system', false);
-  const { data: tasks } = await supabase.from('tasks').select('id, status');
+type StatsTask = Pick<Task, 'id' | 'title' | 'assigned_user_id' | 'status' | 'created_at' | 'closed_at'>;
+type StatsUpdate = Pick<TaskUpdate, 'task_id' | 'user_id' | 'hours_spent' | 'time_type' | 'timestamp'>;
 
-  return cats.map(cat => {
-    const parent = cat.parent_id ? cats.find(c => c.id === cat.parent_id) : null;
-    const taskIds = tcs?.filter(tc => tc.category_id === cat.id).map(tc => tc.task_id) || [];
-    const catUpdates = updates?.filter(u => taskIds.includes(u.task_id)) || [];
-    const hours = catUpdates.reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0);
-    const closed = tasks?.filter(t => taskIds.includes(t.id) && t.status === 'closed').length || 0;
-    
+function roundHours(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function dayKey(value: string | null | undefined): string {
+  return String(value || '').split('T')[0];
+}
+
+function isWithinDateRange(value: string | null | undefined, filters: StatsFilters): boolean {
+  const date = dayKey(value);
+  if (!date) return false;
+  if (filters.startDate && date < filters.startDate) return false;
+  if (filters.endDate && date > filters.endDate) return false;
+  return true;
+}
+
+function getChildCategories(parentId: string, categories: Category[]): Category[] {
+  return categories.filter(cat => cat.parent_id === parentId);
+}
+
+function taskMatchesCategoryFilters(taskId: string, filters: StatsFilters, taskCategories: TaskCategory[], categories: Category[]): boolean {
+  if (!filters.parentCategoryId && !filters.childCategoryName) return true;
+
+  const categoryIds = taskCategories.filter(tc => tc.task_id === taskId).map(tc => tc.category_id);
+  const taskCats = categoryIds.map(id => categories.find(cat => cat.id === id)).filter((cat): cat is Category => Boolean(cat));
+
+  if (filters.parentCategoryId) {
+    const hasParent = taskCats.some(cat => cat.id === filters.parentCategoryId || cat.parent_id === filters.parentCategoryId);
+    if (!hasParent) return false;
+  }
+
+  if (filters.childCategoryName) {
+    return taskCats.some(cat =>
+      cat.parent_id &&
+      cat.name === filters.childCategoryName &&
+      (!filters.parentCategoryId || cat.parent_id === filters.parentCategoryId)
+    );
+  }
+
+  return true;
+}
+
+function filterTasks(tasks: StatsTask[], filters: StatsFilters, taskCategories: TaskCategory[], categories: Category[]): StatsTask[] {
+  return tasks.filter(task => {
+    if (filters.dateMode === 'task_created' && !isWithinDateRange(task.created_at, filters)) return false;
+    if (filters.userId && task.assigned_user_id !== filters.userId) return false;
+    return taskMatchesCategoryFilters(task.id, filters, taskCategories, categories);
+  });
+}
+
+function filterUpdates(updates: StatsUpdate[], taskIds: Set<string>, filters: StatsFilters): StatsUpdate[] {
+  return updates.filter(update => {
+    if (!taskIds.has(update.task_id)) return false;
+    if (filters.dateMode !== 'task_created' && !isWithinDateRange(update.timestamp, filters)) return false;
+    if (filters.timeType && update.time_type !== filters.timeType) return false;
+    if (filters.userId && update.user_id !== filters.userId) return false;
+    return true;
+  });
+}
+
+function sumHours(updates: StatsUpdate[]): number {
+  return roundHours(updates.reduce((sum, update) => sum + (Number(update.hours_spent) || 0), 0));
+}
+
+async function buildStatsDashboard(filters: StatsFilters = {}) {
+  const normalizedFilters: StatsFilters = {
+    dateMode: filters.dateMode || 'hours_logged',
+    startDate: filters.startDate || null,
+    endDate: filters.endDate || null,
+    timeType: filters.timeType || null,
+    parentCategoryId: filters.parentCategoryId || null,
+    childCategoryName: filters.childCategoryName || null,
+    userId: filters.userId || null,
+  };
+
+  const [categories, users, taskCategoriesResult, updatesResult, tasksResult] = await Promise.all([
+    getAllCategories(),
+    getAllUsers(),
+    supabase.from('task_categories').select('task_id, category_id'),
+    supabase.from('task_updates').select('task_id, user_id, hours_spent, time_type, timestamp').eq('deleted', false).eq('is_system', false),
+    supabase.from('tasks').select('id, title, assigned_user_id, status, created_at, closed_at'),
+  ]);
+
+  const taskCategories = (taskCategoriesResult.data || []) as TaskCategory[];
+  const allUpdates = (updatesResult.data || []) as StatsUpdate[];
+  const allTasks = (tasksResult.data || []) as StatsTask[];
+  const visibleUsers = users.filter(user => user.show_in_stats !== false);
+  const userById = new Map(users.map(user => [user.id, user]));
+  const filteredTasks = filterTasks(allTasks, normalizedFilters, taskCategories, categories);
+  const filteredTaskIds = new Set(filteredTasks.map(task => task.id));
+  const filteredUpdates = filterUpdates(allUpdates, filteredTaskIds, normalizedFilters);
+  const tasksWithFilteredUpdates = new Set(filteredUpdates.map(update => update.task_id));
+  const countedTasks = normalizedFilters.dateMode === 'task_created' && !normalizedFilters.timeType
+    ? filteredTasks
+    : filteredTasks.filter(task => tasksWithFilteredUpdates.has(task.id));
+  const countedTaskIds = new Set(countedTasks.map(task => task.id));
+
+  const overview = {
+    totalTasks: countedTasks.length,
+    pendingTasks: countedTasks.filter(t => t.status === 'pending').length,
+    inProgressTasks: countedTasks.filter(t => t.status === 'in_progress').length,
+    waitingApprovalTasks: countedTasks.filter(t => t.status === 'waiting_approval').length,
+    closedTasks: countedTasks.filter(t => t.status === 'closed').length,
+    rejectedTasks: countedTasks.filter(t => t.status === 'rejected').length,
+    totalHours: sumHours(filteredUpdates),
+    officeHours: sumHours(filteredUpdates.filter(u => u.time_type === 'office')),
+    outsideHours: sumHours(filteredUpdates.filter(u => u.time_type === 'outside')),
+  };
+
+  const parentCategories = categories.filter(cat => !cat.parent_id);
+  const categoryStats = parentCategories.map(parent => {
+    const categoryIds = new Set([parent.id, ...getChildCategories(parent.id, categories).map(cat => cat.id)]);
+    const taskIds = new Set(taskCategories.filter(tc => categoryIds.has(tc.category_id)).map(tc => tc.task_id));
+    const parentTasks = countedTasks.filter(task => taskIds.has(task.id));
+    const parentTaskIds = new Set(parentTasks.map(task => task.id));
+    const parentUpdates = filteredUpdates.filter(update => parentTaskIds.has(update.task_id));
+
     return {
-      category_id: cat.id,
-      category_name: cat.name,
-      parent_category_id: cat.parent_id,
-      parent_category_name: parent?.name || null,
-      category_label: getCategoryLabel(cat, cats),
-      hours_spent: Math.round(hours * 100) / 100,
-      tasks_closed: closed,
+      category_id: parent.id,
+      category_name: parent.name,
+      parent_category_id: null,
+      parent_category_name: null,
+      category_label: parent.name.trim(),
+      hours_spent: sumHours(parentUpdates),
+      tasks_closed: parentTasks.filter(task => task.status === 'closed').length,
     };
   }).filter(c => c.hours_spent > 0 || c.tasks_closed > 0);
-}
 
-export async function getUserStatsAll(): Promise<any[]> {
-  const users = (await getAllUsers()).filter(user => user.show_in_stats !== false);
-  const { data: tasks } = await supabase.from('tasks').select('id, assigned_user_id, status');
-  const { data: updates } = await supabase.from('task_updates').select('user_id, hours_spent, time_type').eq('deleted', false).eq('is_system', false);
+  const selectedParent = normalizedFilters.parentCategoryId
+    ? categories.find(cat => cat.id === normalizedFilters.parentCategoryId)
+    : null;
 
-  return users.map(user => {
-    const userUpdates = updates?.filter(u => u.user_id === user.id) || [];
-    const totalHours = userUpdates.reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0);
-    const officeHours = userUpdates.filter(u => u.time_type === 'office').reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0);
-    const outsideHours = userUpdates.filter(u => u.time_type === 'outside').reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0);
-    const completed = tasks?.filter(t => t.assigned_user_id === user.id && t.status === 'closed').length || 0;
+  const childSourceCategories = selectedParent
+    ? getChildCategories(selectedParent.id, categories)
+    : categories.filter(cat => Boolean(cat.parent_id));
+
+  const childCategoryStats = childSourceCategories.map(child => {
+    const childTaskIds = new Set(taskCategories.filter(tc => tc.category_id === child.id).map(tc => tc.task_id));
+    const childTasks = countedTasks.filter(task => childTaskIds.has(task.id));
+    const childTaskIdsFiltered = new Set(childTasks.map(task => task.id));
+    const childUpdates = filteredUpdates.filter(update => childTaskIdsFiltered.has(update.task_id));
+
+    return {
+      category_id: child.id,
+      category_name: child.name,
+      parent_category_id: child.parent_id,
+      parent_category_name: categories.find(cat => cat.id === child.parent_id)?.name || null,
+      category_label: selectedParent ? child.name.trim() : getCategoryLabel(child, categories),
+      hours_spent: sumHours(childUpdates),
+      tasks_closed: childTasks.filter(task => task.status === 'closed').length,
+    };
+  }).filter(c => c.hours_spent > 0 || c.tasks_closed > 0);
+
+  const childCategoryMap = new Map<string, { category_name: string; hours_spent: number; tasks_closed: number; taskIds: Set<string> }>();
+  categories.filter(cat => Boolean(cat.parent_id)).forEach(child => {
+    const childTaskIds = new Set(taskCategories.filter(tc => tc.category_id === child.id).map(tc => tc.task_id));
+    const childTasks = countedTasks.filter(task => childTaskIds.has(task.id));
+    const childTaskIdsFiltered = new Set(childTasks.map(task => task.id));
+    const childUpdates = filteredUpdates.filter(update => childTaskIdsFiltered.has(update.task_id));
+    const current = childCategoryMap.get(child.name) || {
+      category_name: child.name,
+      hours_spent: 0,
+      tasks_closed: 0,
+      taskIds: new Set<string>(),
+    };
+
+    childTasks.forEach(task => current.taskIds.add(task.id));
+    current.hours_spent += childUpdates.reduce((sum, update) => sum + (Number(update.hours_spent) || 0), 0);
+    current.tasks_closed = Array.from(current.taskIds)
+      .map(id => countedTasks.find(task => task.id === id))
+      .filter((task): task is StatsTask => Boolean(task))
+      .filter(task => task.status === 'closed').length;
+    childCategoryMap.set(child.name, current);
+  });
+
+  const childCategoryGlobalStats = Array.from(childCategoryMap.values())
+    .map(item => ({
+      category_id: item.category_name,
+      category_name: item.category_name,
+      category_label: item.category_name,
+      hours_spent: roundHours(item.hours_spent),
+      tasks_closed: item.tasks_closed,
+    }))
+    .filter(c => c.hours_spent > 0 || c.tasks_closed > 0)
+    .sort((a, b) => a.category_name.localeCompare(b.category_name));
+
+  const userStats = visibleUsers.map(user => {
+    const userUpdates = filteredUpdates.filter(update => update.user_id === user.id);
+    const userTaskIds = new Set(userUpdates.map(update => update.task_id));
+    const assignedClosed = countedTasks.filter(task => task.assigned_user_id === user.id && task.status === 'closed').length;
+    const completed = assignedClosed || countedTasks.filter(task => userTaskIds.has(task.id) && task.status === 'closed').length;
+    const totalHours = sumHours(userUpdates);
     const avgPerTask = completed > 0 ? totalHours / completed : 0;
-    
+
     return {
       user_id: user.id,
       full_name: user.full_name,
-      total_hours: Math.round(totalHours * 100) / 100,
-      office_hours: Math.round(officeHours * 100) / 100,
-      outside_hours: Math.round(outsideHours * 100) / 100,
+      total_hours: totalHours,
+      office_hours: sumHours(userUpdates.filter(update => update.time_type === 'office')),
+      outside_hours: sumHours(userUpdates.filter(update => update.time_type === 'outside')),
       tasks_completed: completed,
-      avg_hours_per_task: Math.round(avgPerTask * 100) / 100,
+      avg_hours_per_task: roundHours(avgPerTask),
     };
-  });
+  }).filter(user => user.total_hours > 0 || user.tasks_completed > 0);
+
+  const individualStats = normalizedFilters.userId
+    ? buildIndividualStats(filteredUpdates, taskCategories, categories)
+    : null;
+
+  const taskDetails = countedTasks.map(task => {
+    const taskUpdates = filteredUpdates.filter(update => update.task_id === task.id);
+    const taskCats = taskCategories
+      .filter(tc => tc.task_id === task.id)
+      .map(tc => categories.find(cat => cat.id === tc.category_id))
+      .filter((cat): cat is Category => Boolean(cat));
+    const categoryLabels = taskCats.map(cat => getCategoryLabel(cat, categories));
+    const durationDays = task.closed_at
+      ? Math.max(0, Math.ceil((new Date(task.closed_at).getTime() - new Date(task.created_at).getTime()) / (1000 * 60 * 60 * 24)))
+      : null;
+
+    return {
+      task_id: task.id,
+      title: task.title,
+      status: task.status,
+      assigned_user: userById.get(task.assigned_user_id)?.full_name || 'Sin asignar',
+      category_labels: categoryLabels,
+      created_at: task.created_at,
+      closed_at: task.closed_at,
+      hours_spent: sumHours(taskUpdates),
+      office_hours: sumHours(taskUpdates.filter(update => update.time_type === 'office')),
+      outside_hours: sumHours(taskUpdates.filter(update => update.time_type === 'outside')),
+      duration_days: durationDays,
+    };
+  }).sort((a, b) => b.hours_spent - a.hours_spent || a.title.localeCompare(b.title));
+
+  return {
+    overview,
+    categoryStats,
+    childCategoryStats,
+    childCategoryGlobalStats,
+    userStats,
+    individualStats,
+    taskDetails,
+    filters: normalizedFilters,
+  };
 }
 
-export async function getIndividualUserStats(userId: string): Promise<any> {
-  const { data: updates } = await supabase.from('task_updates')
-    .select('task_id, hours_spent, timestamp')
-    .eq('user_id', userId)
-    .eq('deleted', false)
-    .eq('is_system', false);
-
-  const { data: tcs } = await supabase.from('task_categories').select('task_id, category_id');
-  const cats = await getAllCategories();
-
-  // Daily hours
+function buildIndividualStats(updates: StatsUpdate[], taskCategories: TaskCategory[], categories: Category[]) {
   const dailyMap = new Map<string, number>();
-  updates?.forEach(u => {
-    const date = String(u.timestamp).split('T')[0];
-    dailyMap.set(date, (dailyMap.get(date) || 0) + (Number(u.hours_spent) || 0));
+  updates.forEach(update => {
+    const date = dayKey(update.timestamp);
+    dailyMap.set(date, (dailyMap.get(date) || 0) + (Number(update.hours_spent) || 0));
   });
-  const daily = Array.from(dailyMap.entries()).map(([date, hours]) => ({ date, hours: Math.round(hours * 100) / 100 })).sort((a, b) => a.date.localeCompare(b.date));
+  const daily = Array.from(dailyMap.entries()).map(([date, hours]) => ({ date, hours: roundHours(hours) })).sort((a, b) => a.date.localeCompare(b.date));
 
-  // Weekly hours
   const weeklyMap = new Map<string, number>();
-  updates?.forEach(u => {
-    const d = new Date(String(u.timestamp));
+  updates.forEach(update => {
+    const d = new Date(String(update.timestamp));
     const weekStart = new Date(d);
     weekStart.setDate(d.getDate() - d.getDay());
     const weekKey = weekStart.toISOString().split('T')[0];
-    weeklyMap.set(weekKey, (weeklyMap.get(weekKey) || 0) + (Number(u.hours_spent) || 0));
+    weeklyMap.set(weekKey, (weeklyMap.get(weekKey) || 0) + (Number(update.hours_spent) || 0));
   });
-  const weekly = Array.from(weeklyMap.entries()).map(([week, hours]) => ({ week, hours: Math.round(hours * 100) / 100 })).sort((a, b) => a.week.localeCompare(b.week));
+  const weekly = Array.from(weeklyMap.entries()).map(([week, hours]) => ({ week, hours: roundHours(hours) })).sort((a, b) => a.week.localeCompare(b.week));
 
-  // By category
   const catHoursMap = new Map<string, { category_name: string; category_label: string; hours: number }>();
-  updates?.forEach(u => {
-    const taskCats = tcs?.filter(tc => tc.task_id === u.task_id) || [];
+  updates.forEach(update => {
+    const taskCats = taskCategories.filter(tc => tc.task_id === update.task_id);
     taskCats.forEach(tc => {
-      const cat = cats.find(c => c.id === tc.category_id);
+      const cat = categories.find(c => c.id === tc.category_id);
       if (cat) {
         const current = catHoursMap.get(cat.id);
-        const hours = Number(u.hours_spent) || 0;
         catHoursMap.set(cat.id, {
           category_name: cat.name,
-          category_label: getCategoryLabel(cat, cats),
-          hours: (current?.hours || 0) + hours,
+          category_label: getCategoryLabel(cat, categories),
+          hours: (current?.hours || 0) + (Number(update.hours_spent) || 0),
         });
       }
     });
@@ -378,10 +556,30 @@ export async function getIndividualUserStats(userId: string): Promise<any> {
     category_id,
     category_name: data.category_name,
     category_label: data.category_label,
-    hours: Math.round(data.hours * 100) / 100,
+    hours: roundHours(data.hours),
   }));
 
   return { daily, weekly, byCategory };
+}
+
+export async function getStatsDashboard(filters: StatsFilters = {}) {
+  return buildStatsDashboard(filters);
+}
+
+export async function getStatsOverview(filters: StatsFilters = {}): Promise<any> {
+  return (await buildStatsDashboard(filters)).overview;
+}
+
+export async function getCategoryStats(filters: StatsFilters = {}): Promise<any[]> {
+  return (await buildStatsDashboard(filters)).categoryStats;
+}
+
+export async function getUserStatsAll(filters: StatsFilters = {}): Promise<any[]> {
+  return (await buildStatsDashboard(filters)).userStats;
+}
+
+export async function getIndividualUserStats(userId: string, filters: StatsFilters = {}): Promise<any> {
+  return (await buildStatsDashboard({ ...filters, userId })).individualStats;
 }
 
 export async function getUnreadCount(userId: string): Promise<number> {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRole } from '@/lib/auth';
-import { getStatsOverview, getCategoryStats, getUserStatsAll, getIndividualUserStats } from '@/lib/db';
+import { getStatsDashboard, StatsDateMode } from '@/lib/db';
+import { TimeType } from '@/lib/types';
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,22 +12,21 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
+    const dateMode = searchParams.get('dateMode') === 'task_created' ? 'task_created' : 'hours_logged';
+    const timeTypeParam = searchParams.get('timeType');
+    const timeType = timeTypeParam === 'office' || timeTypeParam === 'outside' ? timeTypeParam : null;
 
-    const overview = await getStatsOverview();
-    const categoryStats = await getCategoryStats();
-    const userStats = await getUserStatsAll();
-
-    let individualStats = null;
-    if (userId) {
-      individualStats = await getIndividualUserStats(userId);
-    }
-
-    return NextResponse.json({
-      overview,
-      categoryStats,
-      userStats,
-      individualStats,
+    const stats = await getStatsDashboard({
+      userId: userId || null,
+      dateMode: dateMode as StatsDateMode,
+      timeType: timeType as TimeType | null,
+      startDate: searchParams.get('startDate'),
+      endDate: searchParams.get('endDate'),
+      parentCategoryId: searchParams.get('parentCategoryId'),
+      childCategoryName: searchParams.get('childCategoryName'),
     });
+
+    return NextResponse.json(stats);
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Error' }, { status: 403 });
   }
