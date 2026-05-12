@@ -1492,14 +1492,14 @@ function StatisticsPage({ session }: { session: AuthSession }) {
             ) : <p className="text-gray-400 text-center py-8">Sin datos</p>}
           </div>
 
-          {/* Weekly Hours */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h3 className="font-bold text-gray-800 mb-4">Horas por Semana</h3>
-            {stats.individualStats.weekly.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={stats.individualStats.weekly}>
-                  <CartesianGrid strokeDasharray="3 3" />
-          </div>
+
+
+
+
+
+
+
+
 
           {/* Summary */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
