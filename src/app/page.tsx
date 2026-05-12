@@ -1286,7 +1286,7 @@ function StatisticsPage({ session }: { session: AuthSession }) {
       ? 'Horas por AP / MT / BT agrupado'
       : selectedParent
         ? `Detalle de ${selectedParent.category_label}`
-        : 'Horas por CategorÃ­a Principal';
+        : 'Horas por Categoría Principal';
   const officeOutsideData = [
     { name: 'Oficina', type: 'office', value: stats?.overview?.officeHours || 0 },
     { name: 'Fuera', type: 'outside', value: stats?.overview?.outsideHours || 0 },
@@ -1363,8 +1363,8 @@ function StatisticsPage({ session }: { session: AuthSession }) {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {[
-              { key: 'parents', label: 'CategorÃ­as principales' },
-              { key: 'children', label: selectedParent ? `AP/MT/BT de ${selectedParent.category_label}` : 'AP/MT/BT por categorÃ­a' },
+              { key: 'parents', label: 'Categorías principales' },
+              { key: 'children', label: selectedParent ? `AP/MT/BT de ${selectedParent.category_label}` : 'AP/MT/BT por categoría' },
               { key: 'globalChildren', label: 'AP/MT/BT agrupado' },
             ].map(item => (
               <button
@@ -1377,15 +1377,15 @@ function StatisticsPage({ session }: { session: AuthSession }) {
             ))}
             {(timeType || selectedParentCategoryId || selectedChildName || categoryView !== 'parents') && (
               <button onClick={clearInteractiveFilters} className="px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">
-                Limpiar selecciÃ³n
+                Limpiar selección
               </button>
             )}
           </div>
           {(timeType || selectedParent || selectedChildName) && (
             <div className="flex flex-wrap gap-2 text-xs">
               {timeType && <span className="px-2 py-1 rounded-full bg-amber-50 text-amber-700">Tiempo: {timeType === 'office' ? 'Oficina' : 'Fuera'}</span>}
-              {selectedParent && <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700">CategorÃ­a: {selectedParent.category_label}</span>}
-              {selectedChildName && <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">SubcategorÃ­a: {selectedChildName}</span>}
+              {selectedParent && <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700">Categoría: {selectedParent.category_label}</span>}
+              {selectedChildName && <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">Subcategoría: {selectedChildName}</span>}
             </div>
           )}
         </div>
@@ -1499,30 +1499,6 @@ function StatisticsPage({ session }: { session: AuthSession }) {
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={stats.individualStats.weekly}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="week" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Bar dataKey="hours" fill="#8B5CF6" radius={[4, 4, 0, 0]} name="Horas" />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : <p className="text-gray-400 text-center py-8">Sin datos</p>}
-          </div>
-
-          {/* By Category */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h3 className="font-bold text-gray-800 mb-4">Horas por Categoría</h3>
-            {stats.individualStats.byCategory.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie data={stats.individualStats.byCategory} cx="50%" cy="50%" outerRadius={100} fill="#8884d8" dataKey="hours" nameKey="category_label" label={({ category_label, hours }) => `${category_label}: ${hours}h`}>
-                    {stats.individualStats.byCategory.map((_: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : <p className="text-gray-400 text-center py-8">Sin datos</p>}
           </div>
 
           {/* Summary */}
@@ -1552,15 +1528,15 @@ function StatisticsPage({ session }: { session: AuthSession }) {
         </div>
       )}
       <div className="bg-white rounded-2xl border border-gray-200 p-6 mt-6">
-        <h3 className="font-bold text-gray-800 mb-1">Tareas en la selecciÃ³n</h3>
-        <p className="text-xs text-gray-500 mb-4">Lista compacta segÃºn periodo, usuario, categorÃ­a y tipo de tiempo.</p>
+        <h3 className="font-bold text-gray-800 mb-1">Tareas en la selección</h3>
+        <p className="text-xs text-gray-500 mb-4">Lista compacta según periodo, usuario, categoría y tipo de tiempo.</p>
         {stats.taskDetails?.length > 0 ? (
           <div className="space-y-2">
             {stats.taskDetails.slice(0, 20).map((task: any) => (
               <div key={task.task_id} className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-2 rounded-xl border border-gray-100 px-4 py-3 text-sm">
                 <div>
                   <p className="font-medium text-gray-800">{task.title}</p>
-                  <p className="text-xs text-gray-500">{task.assigned_user} · {task.category_labels?.slice(0, 2).join(', ') || 'Sin categorÃ­a'}</p>
+                  <p className="text-xs text-gray-500">{task.assigned_user} · {task.category_labels?.slice(0, 2).join(', ') || 'Sin categoría'}</p>
                 </div>
                 <span className="text-right font-semibold text-gray-800">{task.hours_spent}h</span>
                 <span className="text-right text-blue-700">Oficina {task.office_hours}h</span>
@@ -1569,7 +1545,7 @@ function StatisticsPage({ session }: { session: AuthSession }) {
             ))}
             {stats.taskDetails.length > 20 && <p className="text-xs text-gray-400 mt-3">Mostrando 20 de {stats.taskDetails.length} tareas.</p>}
           </div>
-        ) : <p className="text-gray-400 text-center py-8">No hay tareas para la selecciÃ³n actual</p>}
+        ) : <p className="text-gray-400 text-center py-8">No hay tareas para la selección actual</p>}
       </div>
       {false && (
         <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center">
