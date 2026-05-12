@@ -119,6 +119,9 @@ export interface StatsOverview {
 export interface CategoryStats {
   category_id: string;
   category_name: string;
+  parent_category_id?: string | null;
+  parent_category_name?: string | null;
+  category_label: string;
   hours_spent: number;
   tasks_closed: number;
 }

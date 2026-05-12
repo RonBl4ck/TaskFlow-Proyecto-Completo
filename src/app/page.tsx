@@ -1268,7 +1268,7 @@ function StatisticsPage({ session }: { session: AuthSession }) {
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={stats.categoryStats}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="category_name" tick={{ fontSize: 12 }} />
+                  <XAxis dataKey="category_label" tick={{ fontSize: 11 }} angle={-20} textAnchor="end" height={70} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip />
                   <Bar dataKey="hours_spent" fill="#3B82F6" radius={[4, 4, 0, 0]} name="Horas" />
@@ -1319,7 +1319,7 @@ function StatisticsPage({ session }: { session: AuthSession }) {
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={stats.categoryStats.filter((c: any) => c.tasks_closed > 0)}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="category_name" tick={{ fontSize: 12 }} />
+                  <XAxis dataKey="category_label" tick={{ fontSize: 11 }} angle={-20} textAnchor="end" height={70} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip />
                   <Bar dataKey="tasks_closed" fill="#10B981" radius={[4, 4, 0, 0]} name="Tareas Cerradas" />
@@ -1368,7 +1368,7 @@ function StatisticsPage({ session }: { session: AuthSession }) {
             {stats.individualStats.byCategory.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
-                  <Pie data={stats.individualStats.byCategory} cx="50%" cy="50%" outerRadius={100} fill="#8884d8" dataKey="hours" nameKey="category_name" label={({ category_name, hours }) => `${category_name}: ${hours}h`}>
+                  <Pie data={stats.individualStats.byCategory} cx="50%" cy="50%" outerRadius={100} fill="#8884d8" dataKey="hours" nameKey="category_label" label={({ category_label, hours }) => `${category_label}: ${hours}h`}>
                     {stats.individualStats.byCategory.map((_: any, index: number) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}

@@ -194,6 +194,14 @@ export async function softDeleteUpdate(updateId: string): Promise<boolean> {
 
 // ============ CATEGORIES ============
 
+function getCategoryLabel(category: Category, categories: Category[]): string {
+  const name = category.name.trim();
+  if (!category.parent_id) return name;
+
+  const parent = categories.find(c => c.id === category.parent_id);
+  return parent ? `${parent.name.trim()} / ${name}` : name;
+}
+
 export async function getAllCategories(): Promise<Category[]> {
   const { data } = await supabase.from('categories').select('*').eq('active', true);
   if (!data) return [];
@@ -277,12 +285,21 @@ export async function getCategoryStats(): Promise<any[]> {
   const { data: tasks } = await supabase.from('tasks').select('id, status');
 
   return cats.map(cat => {
+    const parent = cat.parent_id ? cats.find(c => c.id === cat.parent_id) : null;
     const taskIds = tcs?.filter(tc => tc.category_id === cat.id).map(tc => tc.task_id) || [];
     const catUpdates = updates?.filter(u => taskIds.includes(u.task_id)) || [];
     const hours = catUpdates.reduce((sum, u) => sum + (Number(u.hours_spent) || 0), 0);
     const closed = tasks?.filter(t => taskIds.includes(t.id) && t.status === 'closed').length || 0;
     
-    return { category_id: cat.id, category_name: cat.name, hours_spent: Math.round(hours * 100) / 100, tasks_closed: closed };
+    return {
+      category_id: cat.id,
+      category_name: cat.name,
+      parent_category_id: cat.parent_id,
+      parent_category_name: parent?.name || null,
+      category_label: getCategoryLabel(cat, cats),
+      hours_spent: Math.round(hours * 100) / 100,
+      tasks_closed: closed,
+    };
   }).filter(c => c.hours_spent > 0 || c.tasks_closed > 0);
 }
 
@@ -341,17 +358,28 @@ export async function getIndividualUserStats(userId: string): Promise<any> {
   const weekly = Array.from(weeklyMap.entries()).map(([week, hours]) => ({ week, hours: Math.round(hours * 100) / 100 })).sort((a, b) => a.week.localeCompare(b.week));
 
   // By category
-  const catHoursMap = new Map<string, number>();
+  const catHoursMap = new Map<string, { category_name: string; category_label: string; hours: number }>();
   updates?.forEach(u => {
     const taskCats = tcs?.filter(tc => tc.task_id === u.task_id) || [];
     taskCats.forEach(tc => {
       const cat = cats.find(c => c.id === tc.category_id);
       if (cat) {
-        catHoursMap.set(cat.name, (catHoursMap.get(cat.name) || 0) + (Number(u.hours_spent) || 0));
+        const current = catHoursMap.get(cat.id);
+        const hours = Number(u.hours_spent) || 0;
+        catHoursMap.set(cat.id, {
+          category_name: cat.name,
+          category_label: getCategoryLabel(cat, cats),
+          hours: (current?.hours || 0) + hours,
+        });
       }
     });
   });
-  const byCategory = Array.from(catHoursMap.entries()).map(([category_name, hours]) => ({ category_name, hours: Math.round(hours * 100) / 100 }));
+  const byCategory = Array.from(catHoursMap.entries()).map(([category_id, data]) => ({
+    category_id,
+    category_name: data.category_name,
+    category_label: data.category_label,
+    hours: Math.round(data.hours * 100) / 100,
+  }));
 
   return { daily, weekly, byCategory };
 }
