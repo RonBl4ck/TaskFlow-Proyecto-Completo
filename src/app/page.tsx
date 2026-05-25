@@ -3,9 +3,21 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { AuthSession, User, Task, Category, TaskWithDetails, SidebarBroadcast } from '@/lib/types';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 
+const FirmadorPage = dynamic(() => import('@/components/FirmadorPage'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center p-12 bg-white rounded-2xl border border-gray-200">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-gray-500 font-medium">Cargando módulo de firma...</p>
+      </div>
+    </div>
+  ),
+});
 
-type Page = 'login' | 'my-tasks' | 'assign-tasks' | 'task-detail' | 'statistics' | 'admin';
+type Page = 'login' | 'my-tasks' | 'assign-tasks' | 'task-detail' | 'statistics' | 'admin' | 'firmador';
 
 export default function HomePage() {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -90,6 +102,7 @@ export default function HomePage() {
           {currentPage === 'task-detail' && selectedTaskId && <TaskDetailPage taskId={selectedTaskId} session={session} onBack={() => navigateTo(session.role === 'executor' ? 'my-tasks' : 'assign-tasks')} refresh={refresh} />}
           {currentPage === 'statistics' && <StatisticsPage session={session} />}
           {currentPage === 'admin' && <AdminPage session={session} refresh={refresh} />}
+          {currentPage === 'firmador' && <FirmadorPage session={session} />}
         </div>
       </main>
     </div>
@@ -242,6 +255,7 @@ function Sidebar({ session, currentPage, collapsed, onNavigate, onToggle, onLogo
     { page: 'assign-tasks', label: 'Asignar Tareas', icon: '📤', show: true },
     { page: 'statistics', label: 'Estadísticas', icon: '📊', show: session.role === 'admin' || session.canViewStats },
     { page: 'admin', label: 'Administración', icon: '⚙️', show: session.role === 'admin' || (session.role === 'assigner' && session.canManageCategories) },
+    { page: 'firmador', label: 'Firmador', icon: '✍️', show: session.role === 'admin' || !!session.canSignDocuments },
   ];
 
   return (
@@ -1656,6 +1670,7 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
                   <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Ver Stats</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">En Gráficos</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Gest. Categorías</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Firmador</th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Acciones</th>
                 </tr>
               </thead>
@@ -1686,6 +1701,13 @@ function AdminPage({ session, refresh }: { session: AuthSession; refresh: () => 
                     </td>
                     <td className="px-4 py-3 text-center">
                       <input type="checkbox" checked={user.can_manage_categories} onChange={e => handleToggleUserCats(user.id, e.target.checked)} className="w-4 h-4 rounded text-blue-600" />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {user.can_sign_documents ? (
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 border border-emerald-100">Activo</span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-500 border border-gray-100">No</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <button onClick={() => setEditUser(user)} className="text-blue-600 hover:text-blue-800 text-sm mr-3 font-medium">Editar</button>
@@ -1880,6 +1902,8 @@ function CreateUserModal({ users, onClose, onCreated }: { users: User[]; onClose
   const [showInStats, setShowInStats] = useState(true);
   const [canManageCats, setCanManageCats] = useState(false);
   const [canViewAllTasks, setCanViewAllTasks] = useState(false);
+  const [canSignDocuments, setCanSignDocuments] = useState(false);
+  const [signatureImageUrl, setSignatureImageUrl] = useState('');
   const [assignableUserIds, setAssignableUserIds] = useState<string[]>([]);
   const [sidebarGifIdle, setSidebarGifIdle] = useState('');
   const [sidebarGifBusy, setSidebarGifBusy] = useState('');
@@ -1904,6 +1928,8 @@ function CreateUserModal({ users, onClose, onCreated }: { users: User[]; onClose
           show_in_stats: showInStats,
           can_manage_categories: canManageCats,
           can_view_all_tasks: canViewAllTasks,
+          can_sign_documents: canSignDocuments,
+          signature_image_url: signatureImageUrl,
           assignable_user_ids: assignableUserIds,
           sidebar_gif_idle: sidebarGifIdle,
           sidebar_gif_busy: sidebarGifBusy,
@@ -1918,7 +1944,7 @@ function CreateUserModal({ users, onClose, onCreated }: { users: User[]; onClose
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b border-gray-100"><h2 className="text-xl font-bold">Nuevo Usuario</h2></div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {error && <div className="bg-red-50 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>}
@@ -1960,6 +1986,16 @@ function CreateUserModal({ users, onClose, onCreated }: { users: User[]; onClose
             </div>
           )}
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={showInStats} onChange={e => setShowInStats(e.target.checked)} className="rounded" /> Mostrar en gráficos de estadísticas</label>
+          <div className="space-y-3 rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+            <label className="flex items-center gap-2 text-sm font-medium text-emerald-800">
+              <input type="checkbox" checked={canSignDocuments} onChange={e => setCanSignDocuments(e.target.checked)} className="rounded text-emerald-600" />
+              Puede firmar documentos
+            </label>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Imagen de firma</label>
+              <input value={signatureImageUrl} onChange={e => setSignatureImageUrl(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" placeholder="/firmas/mi-firma.png o https://..." />
+            </div>
+          </div>
           {role === 'executor' && (
             <div className="space-y-2 p-3 bg-gray-50 rounded-xl border border-gray-100">
               <p className="text-xs font-semibold text-gray-500 uppercase">Delegación (Líder de Equipo)</p>
@@ -1997,6 +2033,8 @@ function EditUserModal({ users, user, onClose, onUpdated }: { users: User[]; use
   const [showInStats, setShowInStats] = useState(user.show_in_stats !== false);
   const [canManageCats, setCanManageCats] = useState(user.can_manage_categories || false);
   const [canViewAllTasks, setCanViewAllTasks] = useState(user.can_view_all_tasks || false);
+  const [canSignDocuments, setCanSignDocuments] = useState(user.can_sign_documents || false);
+  const [signatureImageUrl, setSignatureImageUrl] = useState(user.signature_image_url || '');
   const [assignableUserIds, setAssignableUserIds] = useState<string[]>(user.assignable_user_ids || []);
   const [sidebarGifIdle, setSidebarGifIdle] = useState(user.sidebar_gif_idle || '');
   const [sidebarGifBusy, setSidebarGifBusy] = useState(user.sidebar_gif_busy || '');
@@ -2017,6 +2055,8 @@ function EditUserModal({ users, user, onClose, onUpdated }: { users: User[]; use
         show_in_stats: showInStats,
         can_manage_categories: canManageCats,
         can_view_all_tasks: canViewAllTasks,
+        can_sign_documents: canSignDocuments,
+        signature_image_url: signatureImageUrl,
         assignable_user_ids: assignableUserIds,
         sidebar_gif_idle: sidebarGifIdle,
         sidebar_gif_busy: sidebarGifBusy,
@@ -2039,7 +2079,7 @@ function EditUserModal({ users, user, onClose, onUpdated }: { users: User[]; use
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center">
           <h2 className="text-xl font-bold">Editar Usuario</h2>
           <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">@{user.username}</span>
@@ -2064,6 +2104,16 @@ function EditUserModal({ users, user, onClose, onUpdated }: { users: User[]; use
             </div>
           )}
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={showInStats} onChange={e => setShowInStats(e.target.checked)} className="rounded" /> Mostrar en gráficos de estadísticas</label>
+          <div className="space-y-3 rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+            <label className="flex items-center gap-2 text-sm font-medium text-emerald-800">
+              <input type="checkbox" checked={canSignDocuments} onChange={e => setCanSignDocuments(e.target.checked)} className="rounded text-emerald-600" />
+              Puede firmar documentos
+            </label>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Imagen de firma</label>
+              <input value={signatureImageUrl} onChange={e => setSignatureImageUrl(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl" placeholder="/firmas/mi-firma.png o https://..." />
+            </div>
+          </div>
           {role === 'executor' && (
             <div className="space-y-2 p-3 bg-gray-50 rounded-xl border border-gray-100">
               <p className="text-xs font-semibold text-gray-500 uppercase">Delegación (Líder de Equipo)</p>

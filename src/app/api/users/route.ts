@@ -31,6 +31,8 @@ export async function POST(request: NextRequest) {
       sidebar_gif_busy,
       sidebar_gif_done,
       exclude_sidebar_broadcast,
+      can_sign_documents,
+      signature_image_url,
     } = body;
 
     if (!username || !password || !full_name || !role) {
@@ -61,6 +63,8 @@ export async function POST(request: NextRequest) {
       sidebar_gif_busy: sidebar_gif_busy || null,
       sidebar_gif_done: sidebar_gif_done || null,
       exclude_sidebar_broadcast: exclude_sidebar_broadcast || false,
+      can_sign_documents: can_sign_documents || false,
+      signature_image_url: signature_image_url || null,
       active: true,
     });
 
@@ -88,6 +92,8 @@ export async function PUT(request: NextRequest) {
       sidebar_gif_busy,
       sidebar_gif_done,
       exclude_sidebar_broadcast,
+      can_sign_documents,
+      signature_image_url,
     } = body;
 
     if (!id) {
@@ -106,6 +112,8 @@ export async function PUT(request: NextRequest) {
     if (sidebar_gif_busy !== undefined) updates.sidebar_gif_busy = sidebar_gif_busy || null;
     if (sidebar_gif_done !== undefined) updates.sidebar_gif_done = sidebar_gif_done || null;
     if (exclude_sidebar_broadcast !== undefined) updates.exclude_sidebar_broadcast = exclude_sidebar_broadcast;
+    if (can_sign_documents !== undefined) updates.can_sign_documents = can_sign_documents;
+    if (signature_image_url !== undefined) updates.signature_image_url = signature_image_url || null;
     if (password) updates.password_hash = bcrypt.hashSync(password, 10);
 
     const user = await updateUser(id, updates);

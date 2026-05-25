@@ -16,6 +16,8 @@ export interface User {
   sidebar_gif_done?: string | null;
   exclude_sidebar_broadcast?: boolean;
   active: boolean;
+  can_sign_documents?: boolean;
+  signature_image_url?: string | null;
   created_at: string;
 }
 
@@ -91,6 +93,8 @@ export interface AuthSession {
   sidebarGifBusy?: string | null;
   sidebarGifDone?: string | null;
   excludeSidebarBroadcast?: boolean;
+  canSignDocuments?: boolean;
+  signatureImageUrl?: string | null;
 }
 
 export interface SidebarBroadcast {
@@ -144,4 +148,27 @@ export interface DailyStats {
 export interface WeeklyStats {
   week: string;
   hours: number;
+}
+
+export interface DocumentoFirma {
+  id: string;
+  nombre_archivo: string;
+  gdrive_file_id_temp: string | null;
+  gdrive_file_id_final: string | null;
+  estado: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO';
+  x_coord: number;
+  y_coord: number;
+  ancho: number;
+  alto: number;
+  pagina_num: number;
+  emisor_id: string;
+  firmante_id: string;
+  motivo_rechazo: string | null;
+  creado_at: string;
+  actualizado_at: string;
+}
+
+export interface DocumentoFirmaWithUsers extends DocumentoFirma {
+  emisor?: User;
+  firmante?: User;
 }

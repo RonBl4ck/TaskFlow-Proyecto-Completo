@@ -38,6 +38,8 @@ export async function POST(request: NextRequest) {
       sidebarGifBusy: user.sidebar_gif_busy || null,
       sidebarGifDone: user.sidebar_gif_done || null,
       excludeSidebarBroadcast: user.exclude_sidebar_broadcast || false,
+      canSignDocuments: user.can_sign_documents || false,
+      signatureImageUrl: user.signature_image_url || null,
     });
 
     const response = NextResponse.json({
@@ -55,6 +57,8 @@ export async function POST(request: NextRequest) {
         sidebarGifBusy: user.sidebar_gif_busy || null,
         sidebarGifDone: user.sidebar_gif_done || null,
         excludeSidebarBroadcast: user.exclude_sidebar_broadcast || false,
+        canSignDocuments: user.can_sign_documents || false,
+        signatureImageUrl: user.signature_image_url || null,
       },
     });
 

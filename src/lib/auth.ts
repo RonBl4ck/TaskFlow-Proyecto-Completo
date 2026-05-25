@@ -41,6 +41,8 @@ export async function getSession(): Promise<AuthSession | null> {
       sidebarGifBusy: freshUser.sidebar_gif_busy || null,
       sidebarGifDone: freshUser.sidebar_gif_done || null,
       excludeSidebarBroadcast: freshUser.exclude_sidebar_broadcast || false,
+      canSignDocuments: freshUser.can_sign_documents || false,
+      signatureImageUrl: freshUser.signature_image_url || null,
     };
   } catch {
     return null;

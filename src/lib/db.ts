@@ -1,7 +1,6 @@
-import { User, Task, TaskUpdate, Category, TaskCategory, SidebarBroadcast, TimeType } from './types';
+import { User, Task, TaskUpdate, Category, TaskCategory, SidebarBroadcast, TimeType, DocumentoFirma } from './types';
 import { supabase } from './supabase';
 import { v4 as uuidv4 } from 'uuid';
-import bcrypt from 'bcryptjs';
 
 // ============ USERS ============
 
@@ -23,6 +22,12 @@ export async function getAllUsers(): Promise<User[]> {
 
 export async function getExecutors(): Promise<User[]> {
   const { data } = await supabase.from('users').select('*').eq('role', 'executor').eq('active', true);
+  if (!data) return [];
+  return data.map(u => ({ ...u, password_hash: '' }));
+}
+
+export async function getSigners(): Promise<User[]> {
+  const { data } = await supabase.from('users').select('*').eq('can_sign_documents', true).eq('active', true);
   if (!data) return [];
   return data.map(u => ({ ...u, password_hash: '' }));
 }
@@ -596,4 +601,73 @@ export async function getUnreadCount(userId: string): Promise<number> {
     }
   }
   return count;
+}
+
+// ============ DOCUMENTOS FIRMAS ============
+
+export async function createDocumentoFirma(data: Omit<DocumentoFirma, 'id' | 'creado_at' | 'actualizado_at'>): Promise<DocumentoFirma> {
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  const payload = {
+    ...data,
+    id,
+    creado_at: now,
+    actualizado_at: now
+  };
+  const { data: doc, error } = await supabase.from('documentos_firmas').insert(payload).select().single();
+  if (error) throw new Error(error.message);
+  return doc;
+}
+
+export async function getDocumentoFirmaById(id: string): Promise<DocumentoFirma | undefined> {
+  const { data } = await supabase.from('documentos_firmas').select('*').eq('id', id).single();
+  return data || undefined;
+}
+
+export async function getDocumentoFirmaByStoredFile(fileId: string, folder: 'entrada' | 'firmados'): Promise<DocumentoFirma | undefined> {
+  const column = folder === 'entrada' ? 'gdrive_file_id_temp' : 'gdrive_file_id_final';
+  const { data } = await supabase.from('documentos_firmas').select('*').eq(column, fileId).single();
+  return data || undefined;
+}
+
+export async function getDocumentosFirmaByFirmante(firmanteId: string): Promise<DocumentoFirma[]> {
+  const { data } = await supabase
+    .from('documentos_firmas')
+    .select('*')
+    .eq('firmante_id', firmanteId)
+    .order('creado_at', { ascending: false });
+  return data || [];
+}
+
+export async function getDocumentosFirmaByEmisor(emisorId: string): Promise<DocumentoFirma[]> {
+  const { data } = await supabase
+    .from('documentos_firmas')
+    .select('*')
+    .eq('emisor_id', emisorId)
+    .order('creado_at', { ascending: false });
+  return data || [];
+}
+
+export async function getAllDocumentosFirma(): Promise<DocumentoFirma[]> {
+  const { data } = await supabase
+    .from('documentos_firmas')
+    .select('*')
+    .order('creado_at', { ascending: false });
+  return data || [];
+}
+
+export async function updateDocumentoFirma(id: string, data: Partial<DocumentoFirma>): Promise<DocumentoFirma | null> {
+  const { data: doc, error } = await supabase
+    .from('documentos_firmas')
+    .update({ ...data, actualizado_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return null;
+  return doc;
+}
+
+export async function deleteDocumentoFirma(id: string): Promise<boolean> {
+  const { error } = await supabase.from('documentos_firmas').delete().eq('id', id);
+  return !error;
 }
