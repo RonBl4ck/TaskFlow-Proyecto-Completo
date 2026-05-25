@@ -144,7 +144,6 @@ async function ensureDriveStructure(drive: any) {
 export class StorageService {
   // Asegura que el backend de almacenamiento esté listo
   static async init(): Promise<string> {
-    ensureLocalDirs();
     if (STORAGE_MODE === 'GDRIVE') {
       const drive = await getDriveClient();
       if (drive) {
@@ -153,6 +152,9 @@ export class StorageService {
       }
       throw new Error('Google Drive no esta configurado. Define GDRIVE_SERVICE_ACCOUNT_JSON o GDRIVE_CLIENT_ID/GDRIVE_CLIENT_SECRET/GDRIVE_REFRESH_TOKEN.');
     }
+    
+    // Solo creamos directorios locales si estamos en modo LOCAL
+    ensureLocalDirs();
     return 'LOCAL';
   }
 
