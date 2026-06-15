@@ -67,32 +67,18 @@ export class PDFSigner {
       const radius = Math.min(sigWidth, sigHeight) * 0.45;
 
       console.log(`🛡️ Estampando Sello de Validación de fondo en X:${centerX.toFixed(2)}, Y:${centerY.toFixed(2)} con radio ${radius.toFixed(2)}`);
+      // Textos del sello (Dinámico según Ref Transaccion si existe)
+      let sealText1 = "PD";
+      let sealText2 = "VERIFICADO";
 
-      // Círculo exterior del sello
-      page.drawCircle({
-        x: centerX,
-        y: centerY,
-        size: radius,
-        borderColor: rgb(0.05, 0.2, 0.5), // Azul tinta
-        borderWidth: 1.5,
-        opacity: 0.07, // Muy sutil
-      });
-
-      // Círculo interior del sello
-      page.drawCircle({
-        x: centerX,
-        y: centerY,
-        size: radius - 4,
-        borderColor: rgb(0.05, 0.2, 0.5),
-        borderWidth: 0.75,
-        opacity: 0.04,
-      });
-
-      // Textos del sello (TASKFLOW VERIFICADO)
-      const sealText1 = "TASKFLOW";
-      const sealText2 = "VERIFICADO";
+      if (options.documentoId) {
+        const shortId = options.documentoId.substring(0, 8).toUpperCase();
+        sealText1 = `PD-${shortId}`;
+      }
       
-      const t1Size = Math.max(5, Math.min(8, radius * 0.25));
+      const t1Size = sealText1.length > 5
+        ? Math.max(4, Math.min(6.5, radius * 0.18))
+        : Math.max(5, Math.min(8, radius * 0.25));
       const t2Size = Math.max(4, Math.min(7, radius * 0.2));
       
       const text1Width = helveticaBold.widthOfTextAtSize(sealText1, t1Size);
@@ -103,8 +89,8 @@ export class PDFSigner {
         y: centerY + (radius * 0.1),
         size: t1Size,
         font: helveticaBold,
-        color: rgb(0.05, 0.2, 0.5),
-        opacity: 0.08,
+        color: rgb(0.6, 0.6, 0.6),
+        opacity: 0.25,
       });
 
       page.drawText(sealText2, {
@@ -112,8 +98,8 @@ export class PDFSigner {
         y: centerY - (radius * 0.2),
         size: t2Size,
         font: helveticaBold,
-        color: rgb(0.05, 0.2, 0.5),
-        opacity: 0.08,
+        color: rgb(0.6, 0.6, 0.6),
+        opacity: 0.25,
       });
 
       // 4. Dibujar la firma visual encima del sello
@@ -176,7 +162,7 @@ export class PDFSigner {
             
             if (options.documentoId) {
               const shortId = options.documentoId.substring(0, 8).toUpperCase();
-              lineas.push(`Ref Transaccion: TF-${shortId}`);
+              lineas.push(`Ref Transaccion: PD-${shortId}`);
             }
 
             // Determinar si dibujamos abajo o arriba del QR para evitar salir de la página
@@ -226,7 +212,7 @@ export class PDFSigner {
         
         if (options.documentoId) {
           const shortId = options.documentoId.substring(0, 8).toUpperCase();
-          lineas.push(`Ref Transaccion: TF-${shortId}`);
+          lineas.push(`Ref Transaccion: PD-${shortId}`);
         }
 
         // Determinar si dibujamos abajo o arriba de la firma para evitar salir de la página
