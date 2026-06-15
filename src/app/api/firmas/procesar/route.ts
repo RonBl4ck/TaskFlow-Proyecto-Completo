@@ -94,25 +94,68 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No se pudo descargar el archivo original para firmar.' }, { status: 404 });
     }
 
-    // 6. Aplicar el proceso de firmado (Estampado Visual + PFX Opcional)
+    // 6. Pre-crear el archivo en la carpeta 'firmados' para obtener el File ID y la URL del QR
+    let precreated: { fileId: string; url: string };
+    try {
+      precreated = await StorageService.precrear('firmados', `firmado-${doc.nombre_archivo}`);
+    } catch (precreateError: any) {
+      console.error("❌ Error al pre-crear el archivo en el almacenamiento:", precreateError);
+      return NextResponse.json({ error: 'No se pudo preparar el archivo de salida.' }, { status: 500 });
+    }
+
+    // 7. Aplicar el proceso de firmado (Estampado Visual + PFX Opcional + QR)
     let signedPdfBuffer: Buffer;
     try {
+      // Obtener dirección IP del firmante desde los headers de forma segura
+      const ipHeader = request.headers.get('x-forwarded-for');
+      const ip = ipHeader ? ipHeader.split(',')[0].trim() : 'IP no disponible';
+
+      // Formatear la fecha de firma en horario de Colombia/Perú (GMT-5)
+      const fechaFirma = new Date().toLocaleString('es-ES', {
+        timeZone: 'America/Bogota',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }) + ' (GMT-5)';
+
+      const docAny = doc as any;
+
       signedPdfBuffer = await PDFSigner.firmarDocumento(pdfOriginalBuffer, signatureBuffer, {
         pageIndex: doc.pagina_num - 1,
         x: Number(doc.x_coord),
         y: Number(doc.y_coord),
         width: Number(doc.ancho),
         height: Number(doc.alto),
+        nombreFirmante: firmante.full_name,
+        fechaFirma: fechaFirma,
+        ipFirmante: ip,
+        documentoId: doc.id,
+        // Opciones del código QR
+        qrUrl: precreated.url,
+        qrX: docAny.qr_x_coord !== null && docAny.qr_x_coord !== undefined ? Number(docAny.qr_x_coord) : undefined,
+        qrY: docAny.qr_y_coord !== null && docAny.qr_y_coord !== undefined ? Number(docAny.qr_y_coord) : undefined,
+        qrAncho: docAny.qr_ancho !== null && docAny.qr_ancho !== undefined ? Number(docAny.qr_ancho) : undefined,
+        qrAlto: docAny.qr_alto !== null && docAny.qr_alto !== undefined ? Number(docAny.qr_alto) : undefined,
+        qrPageIndex: docAny.qr_pagina_num !== null && docAny.qr_pagina_num !== undefined ? (Number(docAny.qr_pagina_num) - 1) : undefined,
       });
     } catch (signingError: any) {
       return NextResponse.json({ error: `Error durante el procesamiento del PDF: ${signingError.message}` }, { status: 500 });
     }
 
-    // 7. Subir el archivo PDF firmado final al almacenamiento (firmados)
-    const signedFilename = `firmado-${doc.nombre_archivo}`;
-    const storedSignedFile = await StorageService.upload('firmados', signedFilename, signedPdfBuffer);
+    // 8. Actualizar el contenido del archivo con el PDF firmado final en Drive/Local
+    let storedSignedFile;
+    try {
+      storedSignedFile = await StorageService.update('firmados', precreated.fileId, `firmado-${doc.nombre_archivo}`, signedPdfBuffer);
+    } catch (updateError: any) {
+      console.error("❌ Error al guardar el PDF firmado final:", updateError);
+      return NextResponse.json({ error: 'No se pudo guardar el documento firmado final en el almacenamiento.' }, { status: 500 });
+    }
 
-    // 8. Actualizar base de datos
+    // 9. Actualizar base de datos
     await updateDocumentoFirma(doc.id, {
       estado: 'APROBADO',
       gdrive_file_id_final: storedSignedFile.fileId,

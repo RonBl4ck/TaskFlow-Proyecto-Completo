@@ -5,16 +5,19 @@ const GDRIVE_JSON = process.env.GDRIVE_SERVICE_ACCOUNT_JSON;
 const GDRIVE_CLIENT_ID = process.env.GDRIVE_CLIENT_ID;
 const GDRIVE_CLIENT_SECRET = process.env.GDRIVE_CLIENT_SECRET;
 const GDRIVE_REFRESH_TOKEN = process.env.GDRIVE_REFRESH_TOKEN;
+const GDRIVE_ROOT_FOLDER_ID = process.env.GDRIVE_ROOT_FOLDER_ID;
 const GDRIVE_ROOT = process.env.GDRIVE_ROOT_FOLDER_NAME || 'SSUU CARTAS';
 const HAS_GDRIVE_CREDS = Boolean(
   GDRIVE_JSON || (GDRIVE_CLIENT_ID && GDRIVE_CLIENT_SECRET && GDRIVE_REFRESH_TOKEN)
 );
 
-// En Vercel preferimos Drive para no depender del filesystem efimero de produccion.
+type StorageMode = 'GDRIVE' | 'LOCAL';
+
+// En Vercel Drive debe estar configurado explicitamente; el filesystem de produccion no es persistente.
 const STORAGE_MODE = (
   process.env.STORAGE_MODE ||
-  (process.env.VERCEL || HAS_GDRIVE_CREDS ? 'GDRIVE' : 'LOCAL')
-).toUpperCase();
+  (HAS_GDRIVE_CREDS ? 'GDRIVE' : 'LOCAL')
+).toUpperCase() as StorageMode;
 
 // Directorios para el modo LOCAL
 const LOCAL_BASE_DIR = path.join(process.cwd(), 'public', 'firmas');
@@ -58,6 +61,20 @@ export interface StoredFile {
 let driveClient: any = null;
 let driveFolderMap: Record<string, string> = {}; // 'entrada' | 'firmados' -> Folder ID
 
+function getMissingDriveEnvVars() {
+  if (GDRIVE_JSON) return [];
+
+  const missing = [];
+  if (!GDRIVE_CLIENT_ID) missing.push('GDRIVE_CLIENT_ID');
+  if (!GDRIVE_CLIENT_SECRET) missing.push('GDRIVE_CLIENT_SECRET');
+  if (!GDRIVE_REFRESH_TOKEN) missing.push('GDRIVE_REFRESH_TOKEN');
+  return missing;
+}
+
+function escapeDriveQueryValue(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 async function getDriveClient() {
   if (driveClient) return driveClient;
 
@@ -71,12 +88,13 @@ async function getDriveClient() {
       return driveClient;
     }
 
-    if (!GDRIVE_JSON) {
-      console.warn("⚠️ STORAGE_MODE está configurado en GDRIVE pero no hay credenciales de Google Drive.");
+    const missing = getMissingDriveEnvVars();
+    if (missing.length > 0) {
+      console.warn(`⚠️ STORAGE_MODE=GDRIVE pero faltan variables de Google Drive: ${missing.join(', ')}`);
       return null;
     }
 
-    const credentials = JSON.parse(GDRIVE_JSON);
+    const credentials = JSON.parse(GDRIVE_JSON as string);
     const auth = new google.auth.JWT({
       email: credentials.client_email,
       key: credentials.private_key,
@@ -94,12 +112,18 @@ async function getDriveClient() {
 async function ensureDriveStructure(drive: any) {
   try {
     // 1. Buscar o crear carpeta raíz
-    let rootFolderId = '';
-    const rootQuery = `name='${GDRIVE_ROOT}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    let rootFolderId = GDRIVE_ROOT_FOLDER_ID || '';
+    if (!rootFolderId) {
+    const safeRootName = escapeDriveQueryValue(GDRIVE_ROOT);
+    const rootQuery = `name='${safeRootName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
     const rootRes = await drive.files.list({ q: rootQuery, fields: 'files(id, name)', supportsAllDrives: true, includeItemsFromAllDrives: true });
     const rootFolders = rootRes.data.files || [];
 
     if (rootFolders.length === 0) {
+      if (GDRIVE_JSON) {
+        throw new Error('Con GDRIVE_SERVICE_ACCOUNT_JSON debes usar una carpeta en una Unidad compartida y configurar GDRIVE_ROOT_FOLDER_ID.');
+      }
+
       const rootMeta = {
         name: GDRIVE_ROOT,
         mimeType: 'application/vnd.google-apps.folder',
@@ -110,6 +134,7 @@ async function ensureDriveStructure(drive: any) {
     } else {
       rootFolderId = rootFolders[0].id;
     }
+    }
 
     // 2. Buscar o crear subcarpetas
     const subfolders = {
@@ -118,7 +143,8 @@ async function ensureDriveStructure(drive: any) {
     };
 
     for (const [key, name] of Object.entries(subfolders)) {
-      const subQuery = `name='${name}' and '${rootFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+      const safeName = escapeDriveQueryValue(name);
+      const subQuery = `name='${safeName}' and '${rootFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
       const subRes = await drive.files.list({ q: subQuery, fields: 'files(id, name)', supportsAllDrives: true, includeItemsFromAllDrives: true });
       const foundFolders = subRes.data.files || [];
 
@@ -144,13 +170,26 @@ async function ensureDriveStructure(drive: any) {
 export class StorageService {
   // Asegura que el backend de almacenamiento esté listo
   static async init(): Promise<string> {
+    if (STORAGE_MODE !== 'GDRIVE' && STORAGE_MODE !== 'LOCAL') {
+      throw new Error(`STORAGE_MODE invalido: "${STORAGE_MODE}". Usa GDRIVE o LOCAL.`);
+    }
+
     if (STORAGE_MODE === 'GDRIVE') {
+      const missing = getMissingDriveEnvVars();
+      if (missing.length > 0) {
+        throw new Error(`Google Drive no esta configurado en el servidor. Faltan variables: ${missing.join(', ')}.`);
+      }
+
       const drive = await getDriveClient();
       if (drive) {
         await ensureDriveStructure(drive);
         return 'GDRIVE';
       }
-      throw new Error('Google Drive no esta configurado. Define GDRIVE_SERVICE_ACCOUNT_JSON o GDRIVE_CLIENT_ID/GDRIVE_CLIENT_SECRET/GDRIVE_REFRESH_TOKEN.');
+      throw new Error('No se pudo inicializar Google Drive. Revisa que las credenciales configuradas en Vercel sean validas.');
+    }
+
+    if (process.env.VERCEL) {
+      throw new Error('STORAGE_MODE=LOCAL no es compatible con Vercel porque sus archivos no son persistentes. Configura STORAGE_MODE=GDRIVE y las credenciales de Google Drive.');
     }
     
     // Solo creamos directorios locales si estamos en modo LOCAL
@@ -202,6 +241,118 @@ export class StorageService {
         fileId: safeFilename,
         path: `${folder}/${safeFilename}`,
         url: `/api/firmas/ver?fileId=${encodeURIComponent(safeFilename)}&folder=${folder}`,
+      };
+    }
+  }
+
+  // Pre-crea un archivo vacío para obtener un File ID y URL pública estimada
+  static async precrear(folder: 'entrada' | 'firmados', filename: string): Promise<{ fileId: string; url: string }> {
+    const currentMode = await this.init();
+
+    if (currentMode === 'GDRIVE') {
+      const drive = await getDriveClient();
+      const parentId = driveFolderMap[folder];
+      if (!parentId) throw new Error(`Carpeta de destino de Google Drive no configurada: ${folder}`);
+
+      // Crear archivo vacío en Drive (sin cuerpo)
+      const fileMetadata = {
+        name: filename,
+        parents: [parentId],
+      };
+      
+      const file = await drive.files.create({
+        requestBody: fileMetadata,
+        fields: 'id, webViewLink',
+        supportsAllDrives: true,
+      });
+
+      // Asegurar que la URL sea pública por defecto (estimando su formato final)
+      const fileId = file.data.id;
+      // Para cuentas personales, el enlace webViewLink o el enlace estándar directo funcionan bien.
+      const shareUrl = file.data.webViewLink || `https://drive.google.com/file/d/${fileId}/view?usp=drivesdk`;
+
+      return {
+        fileId,
+        url: shareUrl,
+      };
+    } else {
+      // Modo LOCAL
+      const safeFilename = `${Date.now()}-${sanitizeLocalFilename(filename)}`;
+      
+      // En modo local la URL definitiva que devuelve es la de visualizar del servidor
+      const shareUrl = `/api/firmas/ver?fileId=${encodeURIComponent(safeFilename)}&folder=${folder}`;
+      
+      return {
+        fileId: safeFilename,
+        url: shareUrl,
+      };
+    }
+  }
+
+  // Actualiza el contenido de un archivo pre-creado y le asigna los permisos correspondientes
+  static async update(folder: 'entrada' | 'firmados', fileId: string, filename: string, content: Buffer): Promise<StoredFile> {
+    const currentMode = await this.init();
+
+    if (currentMode === 'GDRIVE') {
+      const drive = await getDriveClient();
+      
+      const { Readable } = require('stream');
+      const media = {
+        mimeType: 'application/pdf',
+        body: Readable.from(content),
+      };
+
+      // Actualizar el archivo precreado con el PDF final firmado
+      await drive.files.update({
+        fileId: fileId,
+        media: media,
+        fields: 'id, name, webViewLink',
+        supportsAllDrives: true,
+      });
+
+      let shareUrl = `https://drive.google.com/file/d/${fileId}/view?usp=drivesdk`;
+
+      // Si es el archivo firmado final en Drive, le damos permisos públicos de lectura
+      if (folder === 'firmados') {
+        try {
+          console.log(`🔓 Configurando permisos de lectura pública en Google Drive para el archivo ${fileId}...`);
+          await drive.permissions.create({
+            fileId: fileId,
+            requestBody: {
+              role: 'reader',
+              type: 'anyone',
+            },
+            supportsAllDrives: true,
+          });
+          
+          // Obtener el webViewLink definitivo tras cambiar permisos
+          const fileMetadata = await drive.files.get({
+            fileId: fileId,
+            fields: 'webViewLink',
+            supportsAllDrives: true,
+          });
+          if (fileMetadata.data.webViewLink) {
+            shareUrl = fileMetadata.data.webViewLink;
+          }
+        } catch (permError) {
+          console.error("⚠️ No se pudo asignar permisos de lectura pública en Google Drive:", permError);
+        }
+      }
+
+      return {
+        fileId: fileId,
+        path: `${folder}/${filename}`,
+        url: shareUrl,
+      };
+    } else {
+      // Modo LOCAL: Guardar en el archivo pre-reservado
+      const destPath = getSafeLocalPath(folder, fileId);
+      fs.writeFileSync(destPath, content);
+
+      return {
+        fileId: fileId,
+        path: `${folder}/${fileId}`,
+        url: `/api/firmas/ver?fileId=${encodeURIComponent(fileId)}&folder=${folder}`,
       };
     }
   }

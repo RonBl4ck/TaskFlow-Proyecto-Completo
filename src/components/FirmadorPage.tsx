@@ -80,8 +80,18 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
   const [firmaAlto, setFirmaAlto] = useState(80);
 
   // Coordenadas relativas en porcentaje (0-100) sobre el lienzo simulador
-  const [coordX, setCoordX] = useState(40);
+  const [coordX, setCoordX] = useState(30);
   const [coordY, setCoordY] = useState(70);
+
+  // Parámetros y posicionamiento del Código QR
+  const [qrHabilitado, setQrHabilitado] = useState(true);
+  const [qrAncho, setQrAncho] = useState(65);
+  const [qrAlto, setQrAlto] = useState(65);
+  const [qrCoordX, setQrCoordX] = useState(70);
+  const [qrCoordY, setQrCoordY] = useState(70);
+
+  // Elemento activo seleccionado para clics directos sobre el lienzo
+  const [activeElement, setActiveElement] = useState<'firma' | 'qr'>('firma');
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -93,6 +103,10 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
   // Dimensiones porcentuales de la firma sobre la hoja simulada
   const widthPercent = (firmaAncho / pageSize.width) * 100;
   const heightPercent = (firmaAlto / pageSize.height) * 100;
+
+  // Dimensiones porcentuales del QR sobre la hoja simulada
+  const qrWidthPercent = (qrAncho / pageSize.width) * 100;
+  const qrHeightPercent = (qrAlto / pageSize.height) * 100;
 
   // Cargar pdfjs dinámicamente desde CDN cdnjs
   useEffect(() => {
@@ -240,14 +254,18 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
     const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
     const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
 
-    // Centrar el recuadro de firma basándose en su propio tamaño dinámico
-    setCoordX(Math.max(0, Math.min(xPercent - (widthPercent / 2), 100 - widthPercent)));
-    setCoordY(Math.max(0, Math.min(yPercent - (heightPercent / 2), 100 - heightPercent)));
+    if (activeElement === 'firma') {
+      setCoordX(Math.max(0, Math.min(xPercent - (widthPercent / 2), 100 - widthPercent)));
+      setCoordY(Math.max(0, Math.min(yPercent - (heightPercent / 2), 100 - heightPercent)));
+    } else if (activeElement === 'qr' && qrHabilitado) {
+      setQrCoordX(Math.max(0, Math.min(xPercent - (qrWidthPercent / 2), 100 - qrWidthPercent)));
+      setQrCoordY(Math.max(0, Math.min(yPercent - (qrHeightPercent / 2), 100 - qrHeightPercent)));
+    }
   };
 
-  // Estados y refs para arrastrar y cambiar tamaño de firma
-  const [isDragging, setIsDragging] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
+  // Estados y refs para arrastrar y cambiar tamaño de firma/QR
+  const [draggedItem, setDraggedItem] = useState<'firma' | 'qr' | null>(null);
+  const [resizedItem, setResizedItem] = useState<'firma' | 'qr' | null>(null);
   
   const dragStartRef = useRef<{
     pointerX: number;
@@ -258,31 +276,32 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
     initialHeight: number;
   }>({ pointerX: 0, pointerY: 0, initialCoordX: 0, initialCoordY: 0, initialWidth: 150, initialHeight: 80 });
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, action: 'drag' | 'resize') => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, action: 'drag' | 'resize', item: 'firma' | 'qr') => {
     e.stopPropagation();
     e.preventDefault();
     
     e.currentTarget.setPointerCapture(e.pointerId);
+    setActiveElement(item);
 
     if (action === 'drag') {
-      setIsDragging(true);
+      setDraggedItem(item);
       dragStartRef.current = {
         pointerX: e.clientX,
         pointerY: e.clientY,
-        initialCoordX: coordX,
-        initialCoordY: coordY,
-        initialWidth: firmaAncho,
-        initialHeight: firmaAlto,
+        initialCoordX: item === 'firma' ? coordX : qrCoordX,
+        initialCoordY: item === 'firma' ? coordY : qrCoordY,
+        initialWidth: item === 'firma' ? firmaAncho : qrAncho,
+        initialHeight: item === 'firma' ? firmaAlto : qrAlto,
       };
     } else if (action === 'resize') {
-      setIsResizing(true);
+      setResizedItem(item);
       dragStartRef.current = {
         pointerX: e.clientX,
         pointerY: e.clientY,
-        initialCoordX: coordX,
-        initialCoordY: coordY,
-        initialWidth: firmaAncho,
-        initialHeight: firmaAlto,
+        initialCoordX: item === 'firma' ? coordX : qrCoordX,
+        initialCoordY: item === 'firma' ? coordY : qrCoordY,
+        initialWidth: item === 'firma' ? firmaAncho : qrAncho,
+        initialHeight: item === 'firma' ? firmaAlto : qrAlto,
       };
     }
   };
@@ -291,7 +310,7 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
     if (!canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
 
-    if (isDragging) {
+    if (draggedItem) {
       e.stopPropagation();
       const deltaX = e.clientX - dragStartRef.current.pointerX;
       const deltaY = e.clientY - dragStartRef.current.pointerY;
@@ -302,17 +321,24 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
       let nextX = dragStartRef.current.initialCoordX + deltaXPercent;
       let nextY = dragStartRef.current.initialCoordY + deltaYPercent;
 
-      nextX = Math.max(0, Math.min(nextX, 100 - widthPercent));
-      nextY = Math.max(0, Math.min(nextY, 100 - heightPercent));
+      const curWidthPercent = draggedItem === 'firma' ? widthPercent : qrWidthPercent;
+      const curHeightPercent = draggedItem === 'firma' ? heightPercent : qrHeightPercent;
 
-      setCoordX(nextX);
-      setCoordY(nextY);
-    } else if (isResizing) {
+      nextX = Math.max(0, Math.min(nextX, 100 - curWidthPercent));
+      nextY = Math.max(0, Math.min(nextY, 100 - curHeightPercent));
+
+      if (draggedItem === 'firma') {
+        setCoordX(nextX);
+        setCoordY(nextY);
+      } else {
+        setQrCoordX(nextX);
+        setQrCoordY(nextY);
+      }
+    } else if (resizedItem) {
       e.stopPropagation();
       const deltaX = e.clientX - dragStartRef.current.pointerX;
       const deltaY = e.clientY - dragStartRef.current.pointerY;
 
-      // Escala de píxeles en pantalla a puntos PDF
       const scaleX = pageSize.width / rect.width;
       const scaleY = pageSize.height / rect.height;
 
@@ -322,19 +348,25 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
       let nextWidth = dragStartRef.current.initialWidth + deltaWidthPoints;
       let nextHeight = dragStartRef.current.initialHeight + deltaHeightPoints;
 
-      nextWidth = Math.max(60, Math.min(nextWidth, 300));
-      nextHeight = Math.max(30, Math.min(nextHeight, 180));
-
-      setFirmaAncho(Math.round(nextWidth));
-      setFirmaAlto(Math.round(nextHeight));
+      if (resizedItem === 'firma') {
+        nextWidth = Math.max(60, Math.min(nextWidth, 300));
+        nextHeight = Math.max(30, Math.min(nextHeight, 180));
+        setFirmaAncho(Math.round(nextWidth));
+        setFirmaAlto(Math.round(nextHeight));
+      } else {
+        // El QR mantiene relación de aspecto cuadrada para escanearse correctamente
+        const size = Math.max(40, Math.min(nextWidth, 150));
+        setQrAncho(Math.round(size));
+        setQrAlto(Math.round(size));
+      }
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
     e.currentTarget.releasePointerCapture(e.pointerId);
-    setIsDragging(false);
-    setIsResizing(false);
+    setDraggedItem(null);
+    setResizedItem(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -367,6 +399,19 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
       formData.append('ancho', firmaAncho.toString());
       formData.append('alto', firmaAlto.toString());
       formData.append('paginaNum', paginaNum.toString());
+
+      // Añadir datos de coordenadas del QR si está habilitado
+      if (qrHabilitado) {
+        const qrXPoints = (qrCoordX / 100) * pdfWidthPoints;
+        const qrYWebPoints = (qrCoordY / 100) * pdfHeightPoints;
+        const qrYPoints = pdfHeightPoints - qrYWebPoints - qrAlto;
+        
+        formData.append('qr_x', qrXPoints.toFixed(2));
+        formData.append('qr_y', qrYPoints.toFixed(2));
+        formData.append('qr_ancho', qrAncho.toString());
+        formData.append('qr_alto', qrAlto.toString());
+        formData.append('qr_pagina_num', paginaNum.toString());
+      }
 
       const res = await fetch('/api/firmas/solicitar', {
         method: 'POST',
@@ -452,64 +497,165 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
             </div>
           </div>
 
-          {/* Ajuste de Tamaño de Firma */}
+          {/* Habilitar QR y Elemento Activo */}
+          <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200/50 space-y-3">
+            <div className="flex items-center justify-between border-b border-gray-200/50 pb-2">
+              <label className="text-xs font-bold text-gray-600 uppercase tracking-wide flex items-center gap-1.5">
+                📷 Incluir Código QR
+              </label>
+              <input
+                type="checkbox"
+                checked={qrHabilitado}
+                onChange={e => {
+                  setQrHabilitado(e.target.checked);
+                  if (!e.target.checked && activeElement === 'qr') {
+                    setActiveElement('firma');
+                  }
+                }}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+              />
+            </div>
+
+            {qrHabilitado && (
+              <div>
+                <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1.5">🎯 Modificar Elemento:</label>
+                <div className="flex gap-2 bg-gray-200/50 p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setActiveElement('firma')}
+                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      activeElement === 'firma'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-gray-600 hover:text-gray-800'
+                    }`}
+                  >
+                    ✍️ Firma
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveElement('qr')}
+                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      activeElement === 'qr'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-gray-600 hover:text-gray-800'
+                    }`}
+                  >
+                    📷 Código QR
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Ajuste de Tamaño Dinámico según elemento activo */}
           <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200/50 space-y-4">
-            <label className="block text-xs font-bold text-gray-600 uppercase tracking-wide">📐 Tamaño de la Firma</label>
-            <div className="flex gap-2">
-              {[
-                { label: 'Chica', w: 100, h: 50 },
-                { label: 'Normal', w: 150, h: 80 },
-                { label: 'Grande', w: 200, h: 100 },
-                { label: 'Extra', w: 250, h: 120 }
-              ].map(preset => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  onClick={() => { setFirmaAncho(preset.w); setFirmaAlto(preset.h); }}
-                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-                    firmaAncho === preset.w && firmaAlto === preset.h
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            
-            <div className="space-y-3 pt-1">
-              <div>
-                <div className="flex justify-between text-xs text-gray-500 font-bold mb-1">
-                  <span>Ancho: {firmaAncho} pt</span>
-                  <span className="text-gray-400">({(firmaAncho * 0.35).toFixed(0)} mm)</span>
+            {activeElement === 'firma' ? (
+              <>
+                <label className="block text-xs font-bold text-gray-600 uppercase tracking-wide">📐 Tamaño de la Firma</label>
+                <div className="flex gap-2">
+                  {[
+                    { label: 'Chica', w: 100, h: 50 },
+                    { label: 'Normal', w: 150, h: 80 },
+                    { label: 'Grande', w: 200, h: 100 },
+                    { label: 'Extra', w: 250, h: 120 }
+                  ].map(preset => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => { setFirmaAncho(preset.w); setFirmaAlto(preset.h); }}
+                      className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                        firmaAncho === preset.w && firmaAlto === preset.h
+                          ? 'bg-blue-600 text-white shadow-md'
+                          : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
                 </div>
-                <input
-                  type="range"
-                  min={60}
-                  max={300}
-                  step={5}
-                  value={firmaAncho}
-                  onChange={e => setFirmaAncho(parseInt(e.target.value))}
-                  className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                />
-              </div>
-              
-              <div>
-                <div className="flex justify-between text-xs text-gray-500 font-bold mb-1">
-                  <span>Alto: {firmaAlto} pt</span>
-                  <span className="text-gray-400">({(firmaAlto * 0.35).toFixed(0)} mm)</span>
+                
+                <div className="space-y-3 pt-1">
+                  <div>
+                    <div className="flex justify-between text-xs text-gray-500 font-bold mb-1">
+                      <span>Ancho: {firmaAncho} pt</span>
+                      <span className="text-gray-400">({(firmaAncho * 0.35).toFixed(0)} mm)</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={60}
+                      max={300}
+                      step={5}
+                      value={firmaAncho}
+                      onChange={e => setFirmaAncho(parseInt(e.target.value))}
+                      className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    />
+                  </div>
+                  
+                  <div>
+                    <div className="flex justify-between text-xs text-gray-500 font-bold mb-1">
+                      <span>Alto: {firmaAlto} pt</span>
+                      <span className="text-gray-400">({(firmaAlto * 0.35).toFixed(0)} mm)</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={30}
+                      max={180}
+                      step={5}
+                      value={firmaAlto}
+                      onChange={e => setFirmaAlto(parseInt(e.target.value))}
+                      className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    />
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  min={30}
-                  max={180}
-                  step={5}
-                  value={firmaAlto}
-                  onChange={e => setFirmaAlto(parseInt(e.target.value))}
-                  className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                />
-              </div>
-            </div>
+              </>
+            ) : (
+              <>
+                <label className="block text-xs font-bold text-gray-600 uppercase tracking-wide">📐 Tamaño del Código QR</label>
+                <div className="flex gap-2">
+                  {[
+                    { label: 'Chico', size: 50 },
+                    { label: 'Normal', size: 70 },
+                    { label: 'Grande', size: 90 },
+                    { label: 'Extra', size: 110 }
+                  ].map(preset => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => { setQrAncho(preset.size); setQrAlto(preset.size); }}
+                      className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                        qrAncho === preset.size
+                          ? 'bg-emerald-600 text-white shadow-md'
+                          : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="space-y-3 pt-1">
+                  <div>
+                    <div className="flex justify-between text-xs text-gray-500 font-bold mb-1">
+                      <span>Tamaño (cuadrado): {qrAncho} pt</span>
+                      <span className="text-gray-400">({(qrAncho * 0.35).toFixed(0)} mm)</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={40}
+                      max={150}
+                      step={5}
+                      value={qrAncho}
+                      onChange={e => {
+                        const val = parseInt(e.target.value);
+                        setQrAncho(val);
+                        setQrAlto(val);
+                      }}
+                      className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -532,10 +678,10 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
       {/* Simulador Interactivo Derecho */}
       <div className="flex flex-col items-center justify-center p-6 bg-gray-50 rounded-2xl border border-gray-200/50 w-full">
         <div className="mb-4 text-center">
-          <h2 className="text-sm font-bold text-gray-700">2. Ubicar Firma de Forma Visual</h2>
+          <h2 className="text-sm font-bold text-gray-700 font-bold">2. Ubicar Firma y QR de Forma Visual</h2>
           <p className="text-xs text-gray-400 mt-1">
             {file 
-              ? 'Mueve y redimensiona el recuadro azul o haz clic sobre el PDF real.' 
+              ? 'Mueve los recuadros azul (Firma) y verde (QR) sobre la hoja del PDF.' 
               : 'Haz clic en la hoja simulada para ubicar la firma.'}
           </p>
         </div>
@@ -588,7 +734,7 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
 
           {/* Recuadro de firma flotante en la posición exacta */}
           <div 
-            onPointerDown={(e) => handlePointerDown(e, 'drag')}
+            onPointerDown={(e) => handlePointerDown(e, 'drag', 'firma')}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             style={{ 
@@ -598,27 +744,63 @@ function SolicitarFirmaView({ session, onComplete }: { session: AuthSession; onC
               height: `${heightPercent}%` 
             }}
             className={`absolute bg-blue-500/20 border-2 border-blue-500 rounded-lg flex flex-col items-center justify-center p-1 z-20 cursor-move select-none shadow-lg group pointer-events-auto touch-none transition-all duration-75 ${
-              isDragging ? 'border-dashed scale-102 bg-blue-500/35 ring-2 ring-blue-400/50' : 'animate-pulse'
-            }`}
+              draggedItem === 'firma' ? 'border-dashed scale-102 bg-blue-500/35 ring-2 ring-blue-400/50' : 'animate-pulse'
+            } ${activeElement === 'firma' ? 'ring-2 ring-blue-500' : ''}`}
           >
-            <span className="text-[8px] font-bold text-blue-700 leading-none drop-shadow-sm pointer-events-none">✍️ MOVER</span>
-            <span className="text-[6px] text-blue-800 font-bold scale-75 mt-0.5 whitespace-nowrap drop-shadow-sm pointer-events-none">
+            <span className="text-[8px] font-bold text-blue-700 leading-none drop-shadow-sm pointer-events-none">✍️ FIRMA</span>
+            <span className="text-[5px] text-blue-800 font-bold scale-75 mt-0.5 whitespace-nowrap drop-shadow-sm pointer-events-none font-medium">
               {firmaAncho}x{firmaAlto} pt
             </span>
 
             {/* Tirador de cambio de tamaño (Resize Handle) en la esquina inferior derecha */}
             <div
-              onPointerDown={(e) => handlePointerDown(e, 'resize')}
+              onPointerDown={(e) => handlePointerDown(e, 'resize', 'firma')}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
-              className="absolute bottom-0 right-0 w-4 h-4 bg-blue-600 hover:bg-blue-700 rounded-tl-md rounded-br-md border-t border-l border-blue-400 cursor-se-resize flex items-center justify-center z-30 pointer-events-auto shadow"
+              className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-blue-600 hover:bg-blue-700 rounded-tl-md rounded-br-md border-t border-l border-blue-400 cursor-se-resize flex items-center justify-center z-30 pointer-events-auto shadow"
               title="Arrastra para redimensionar"
             >
-              <svg className="w-2.5 h-2.5 text-white pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+              <svg className="w-2 h-2 text-white pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19 19H5m14 0V5" />
               </svg>
             </div>
           </div>
+
+          {/* Recuadro de QR flotante en la posición exacta */}
+          {qrHabilitado && (
+            <div 
+              onPointerDown={(e) => handlePointerDown(e, 'drag', 'qr')}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              style={{ 
+                left: `${qrCoordX}%`, 
+                top: `${qrCoordY}%`,
+                width: `${qrWidthPercent}%`, 
+                height: `${qrHeightPercent}%` 
+              }}
+              className={`absolute bg-emerald-500/20 border-2 border-emerald-500 rounded-lg flex flex-col items-center justify-center p-1 z-20 cursor-move select-none shadow-lg group pointer-events-auto touch-none transition-all duration-75 ${
+                draggedItem === 'qr' ? 'border-dashed scale-102 bg-emerald-500/35 ring-2 ring-emerald-400/50' : 'animate-pulse'
+              } ${activeElement === 'qr' ? 'ring-2 ring-emerald-500' : ''}`}
+            >
+              <span className="text-[8px] font-bold text-emerald-700 leading-none drop-shadow-sm pointer-events-none">📷 QR LINK</span>
+              <span className="text-[5px] text-emerald-800 font-bold scale-75 mt-0.5 whitespace-nowrap drop-shadow-sm pointer-events-none font-medium">
+                {qrAncho}x{qrAlto} pt
+              </span>
+
+              {/* Tirador de cambio de tamaño (Resize Handle) para QR */}
+              <div
+                onPointerDown={(e) => handlePointerDown(e, 'resize', 'qr')}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-600 hover:bg-emerald-700 rounded-tl-md rounded-br-md border-t border-l border-emerald-400 cursor-se-resize flex items-center justify-center z-30 pointer-events-auto shadow"
+                title="Arrastra para redimensionar"
+              >
+                <svg className="w-2 h-2 text-white pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 19H5m14 0V5" />
+                </svg>
+              </div>
+            </div>
+          )}
         </div>
         
         {file && (
@@ -796,13 +978,24 @@ function BandejaView({ session, refreshKey, onActionComplete }: { session: AuthS
                 title="Visor PDF"
               />
               {/* Overlay informativo sobre la firma */}
-              <div className="absolute top-3 right-3 bg-blue-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow-lg pointer-events-none animate-pulse uppercase tracking-wider">
-                📍 Firma en Página {selectedDoc.pagina_num}
+              <div className="absolute top-3 right-3 bg-blue-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow-lg pointer-events-none animate-pulse uppercase tracking-wider flex items-center gap-1">
+                <span>📍 Firma en Página {selectedDoc.pagina_num}</span>
+                {selectedDoc.qr_x_coord !== null && (
+                  <span className="border-l border-white/30 pl-1.5 ml-1.5">📷 + QR</span>
+                )}
               </div>
             </div>
 
+            {/* Nota informativa sobre el QR de validación */}
+            {selectedDoc.qr_x_coord !== null && (
+              <p className="text-[10px] text-gray-500 bg-emerald-50 text-emerald-800 border border-emerald-100 p-2.5 rounded-xl flex items-start gap-2 font-medium">
+                <span className="text-xs">💡</span>
+                <span>Este documento incluye un **Código QR de validación pública** que enlazará a tu Google Drive personal (en modo lectura) y se estampará en la ubicación elegida por el emisor.</span>
+              </p>
+            )}
+
             {/* Controles de Acción */}
-            <div className="flex gap-3 pt-2">
+            <div className="flex gap-3 pt-1">
               <button
                 type="button"
                 onClick={() => setShowRejectModal(true)}

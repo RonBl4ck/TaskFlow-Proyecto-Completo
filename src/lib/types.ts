@@ -166,6 +166,11 @@ export interface DocumentoFirma {
   motivo_rechazo: string | null;
   creado_at: string;
   actualizado_at: string;
+  qr_x_coord?: number | null;
+  qr_y_coord?: number | null;
+  qr_ancho?: number | null;
+  qr_alto?: number | null;
+  qr_pagina_num?: number | null;
 }
 
 export interface DocumentoFirmaWithUsers extends DocumentoFirma {
