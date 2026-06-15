@@ -75,7 +75,7 @@ export class PDFSigner {
         size: radius,
         borderColor: rgb(0.05, 0.2, 0.5), // Azul tinta
         borderWidth: 1.5,
-        opacity: 0.18, // Muy sutil
+        opacity: 0.07, // Muy sutil
       });
 
       // Círculo interior del sello
@@ -85,7 +85,7 @@ export class PDFSigner {
         size: radius - 4,
         borderColor: rgb(0.05, 0.2, 0.5),
         borderWidth: 0.75,
-        opacity: 0.12,
+        opacity: 0.04,
       });
 
       // Textos del sello (TASKFLOW VERIFICADO)
@@ -104,7 +104,7 @@ export class PDFSigner {
         size: t1Size,
         font: helveticaBold,
         color: rgb(0.05, 0.2, 0.5),
-        opacity: 0.25,
+        opacity: 0.08,
       });
 
       page.drawText(sealText2, {
@@ -113,7 +113,7 @@ export class PDFSigner {
         size: t2Size,
         font: helveticaBold,
         color: rgb(0.05, 0.2, 0.5),
-        opacity: 0.25,
+        opacity: 0.08,
       });
 
       // 4. Dibujar la firma visual encima del sello
@@ -124,47 +124,9 @@ export class PDFSigner {
         height: sigHeight,
       });
 
-      // 5. Dibujar los metadatos de firma (Pie de firma)
-      if (options.nombreFirmante) {
-        console.log(`✍️ Estampando metadatos del firmante: ${options.nombreFirmante}`);
-        const metaSize = 5.5;
-        const lineSpacing = 7;
-        
-        const lineas: string[] = [
-          `Firmado digitalmente por: ${options.nombreFirmante}`,
-          `Fecha: ${options.fechaFirma || new Date().toLocaleString('es-ES')}`,
-        ];
-        
-        if (options.ipFirmante) {
-          lineas.push(`IP: ${options.ipFirmante}`);
-        }
-        
-        if (options.documentoId) {
-          const shortId = options.documentoId.substring(0, 8).toUpperCase();
-          lineas.push(`Ref Transaccion: TF-${shortId}`);
-        }
+      let metadataEstampada = false;
 
-        // Determinar si dibujamos abajo o arriba de la firma para evitar salir de la página
-        const totalHeightNeeded = lineas.length * lineSpacing;
-        const dibujarAbajo = safeY >= (totalHeightNeeded + 5);
-        
-        let currentY = dibujarAbajo 
-          ? safeY - 8 
-          : safeY + sigHeight + totalHeightNeeded - 2;
-
-        for (const linea of lineas) {
-          page.drawText(linea, {
-            x: safeX,
-            y: currentY,
-            size: metaSize,
-            font: helveticaFont,
-            color: rgb(0.15, 0.15, 0.15), // Gris oscuro muy formal
-            opacity: 0.9,
-          });
-          currentY -= lineSpacing;
-        }
-      }
-      // 5.1 Generar e incrustar el código QR si se especifica en las opciones
+      // 5. Generar e incrustar el código QR si se especifica en las opciones (y estampar metadatos debajo si QR existe)
       if (options.qrUrl && options.qrX !== undefined && options.qrY !== undefined) {
         try {
           console.log(`📷 Generando código QR para URL: ${options.qrUrl}...`);
@@ -197,23 +159,98 @@ export class PDFSigner {
             height: qrHeight,
           });
 
-          // Dibujar leyenda debajo del QR
-          const qrFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-          const captionText = "Verificar documento";
-          const captionSize = 5;
-          const captionWidth = qrFont.widthOfTextAtSize(captionText, captionSize);
-          
-          if (safeQrY >= 7) {
-            qrPage.drawText(captionText, {
-              x: safeQrX + (qrWidth / 2) - (captionWidth / 2),
-              y: safeQrY - 6,
-              size: captionSize,
-              font: qrFont,
-              color: rgb(0.3, 0.3, 0.3),
-            });
+          // Dibujar los metadatos de firma debajo del QR
+          if (options.nombreFirmante) {
+            console.log(`✍️ Estampando metadatos del firmante bajo el código QR: ${options.nombreFirmante}`);
+            const metaSize = 5.5;
+            const lineSpacing = 7;
+            
+            const lineas: string[] = [
+              `Firmado digitalmente por: ${options.nombreFirmante}`,
+              `Fecha: ${options.fechaFirma || new Date().toLocaleString('es-ES')}`,
+            ];
+            
+            if (options.ipFirmante) {
+              lineas.push(`IP: ${options.ipFirmante}`);
+            }
+            
+            if (options.documentoId) {
+              const shortId = options.documentoId.substring(0, 8).toUpperCase();
+              lineas.push(`Ref Transaccion: TF-${shortId}`);
+            }
+
+            // Determinar si dibujamos abajo o arriba del QR para evitar salir de la página
+            const totalHeightNeeded = lineas.length * lineSpacing;
+            const dibujarAbajo = safeQrY >= (totalHeightNeeded + 5);
+            
+            let currentY = dibujarAbajo 
+              ? safeQrY - 8 
+              : safeQrY + qrHeight + totalHeightNeeded - 2;
+
+            // Evitar desbordamiento horizontal
+            const maxLineWidth = Math.max(...lineas.map(l => helveticaFont.widthOfTextAtSize(l, metaSize)));
+            const textX = Math.max(5, Math.min(safeQrX, qrPageRealWidth - maxLineWidth - 5));
+
+            for (const linea of lineas) {
+              qrPage.drawText(linea, {
+                x: textX,
+                y: currentY,
+                size: metaSize,
+                font: helveticaFont,
+                color: rgb(0.15, 0.15, 0.15), // Gris oscuro muy formal
+                opacity: 0.9,
+              });
+              currentY -= lineSpacing;
+            }
+            metadataEstampada = true;
           }
         } catch (qrError) {
           console.error("⚠️ Error al estampar el código QR en el PDF:", qrError);
+        }
+      }
+
+      // 5.1 Dibujar los metadatos de firma (Pie de firma) - Fallback si no se estampó con el QR
+      if (options.nombreFirmante && !metadataEstampada) {
+        console.log(`✍️ Estampando metadatos del firmante (en firma): ${options.nombreFirmante}`);
+        const metaSize = 5.5;
+        const lineSpacing = 7;
+        
+        const lineas: string[] = [
+          `Firmado digitalmente por: ${options.nombreFirmante}`,
+          `Fecha: ${options.fechaFirma || new Date().toLocaleString('es-ES')}`,
+        ];
+        
+        if (options.ipFirmante) {
+          lineas.push(`IP: ${options.ipFirmante}`);
+        }
+        
+        if (options.documentoId) {
+          const shortId = options.documentoId.substring(0, 8).toUpperCase();
+          lineas.push(`Ref Transaccion: TF-${shortId}`);
+        }
+
+        // Determinar si dibujamos abajo o arriba de la firma para evitar salir de la página
+        const totalHeightNeeded = lineas.length * lineSpacing;
+        const dibujarAbajo = safeY >= (totalHeightNeeded + 5);
+        
+        let currentY = dibujarAbajo 
+          ? safeY - 8 
+          : safeY + sigHeight + totalHeightNeeded - 2;
+
+        // Evitar desbordamiento horizontal
+        const maxLineWidth = Math.max(...lineas.map(l => helveticaFont.widthOfTextAtSize(l, metaSize)));
+        const textX = Math.max(5, Math.min(safeX, pageRealWidth - maxLineWidth - 5));
+
+        for (const linea of lineas) {
+          page.drawText(linea, {
+            x: textX,
+            y: currentY,
+            size: metaSize,
+            font: helveticaFont,
+            color: rgb(0.15, 0.15, 0.15), // Gris oscuro muy formal
+            opacity: 0.9,
+          });
+          currentY -= lineSpacing;
         }
       }
 
